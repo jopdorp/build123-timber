@@ -73,6 +73,10 @@ class LLapJoint(LapJoint):
 class TLapJoint(LapJoint):
     topology: JointTopology = JointTopology.T
 
+    def _get_cut_position_cross(self) -> float:
+        # T-lap: cross timber meets main at its end
+        return self.cross.length - self.main.width / 2
+
     def _get_cut_width_cross(self) -> float:
         return self.main.height
 

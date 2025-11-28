@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from build123d import Box, Cylinder, Part, Location
+from build123d import Align, Axis, Box, Cylinder, Part, Location
 
 from build123_timber.joints.base import Joint, JointTopology
 from build123_timber.joints.utils import notch_cut
@@ -29,7 +29,7 @@ class BirdsmouthJoint(Joint):
             self.main.width * 2,
             self.cross.width,
             self.seat_depth,
-            align=("CENTER", "CENTER", "MAX"),
+            align=(Align.CENTER, Align.CENTER, Align.MAX),
         )
         seat_cut = seat_cut.move(Location((0, 0, -self.cross.height / 2)))
 
@@ -37,7 +37,7 @@ class BirdsmouthJoint(Joint):
             self.heel_depth,
             self.cross.width,
             self.cross.height,
-            align=("MAX", "CENTER", "MIN"),
+            align=(Align.MAX, Align.CENTER, Align.MIN),
         )
         heel_cut = heel_cut.move(
             Location((-self.main.width / 2, 0, -self.cross.height / 2))
@@ -67,7 +67,7 @@ class FrenchRidgeLapJoint(Joint):
             overlap,
             timber.width,
             lap_depth,
-            align=("MIN", "CENTER", "MIN" if at_top else "MAX"),
+            align=(Align.MIN, Align.CENTER, Align.MIN if at_top else Align.MAX),
         )
 
         x_pos = timber.length - overlap
@@ -75,7 +75,7 @@ class FrenchRidgeLapJoint(Joint):
         lap_cut = lap_cut.move(Location((x_pos, 0, z_pos)))
 
         angle = 2.0 if at_top else -2.0
-        lap_cut = lap_cut.rotate(axis=(0, 1, 0), angle=angle)
+        lap_cut = lap_cut.rotate(Axis.Y, angle)
 
         return lap_cut
 
@@ -127,7 +127,7 @@ class StepJoint(Joint):
                 self.main.height,
                 self.cross.width,
                 self.step_depth,
-                align=("MIN", "CENTER", "MIN"),
+                align=(Align.MIN, Align.CENTER, Align.MIN),
             )
             step = step.move(Location((
                 self.cross.length - self.main.height,
@@ -141,7 +141,7 @@ class StepJoint(Joint):
                 self.heel_depth,
                 self.cross.width,
                 self.cross.height / 2,
-                align=("MAX", "CENTER", "MIN"),
+                align=(Align.MAX, Align.CENTER, Align.MIN),
             )
             heel = heel.move(Location((
                 self.cross.length - self.main.height,
@@ -149,7 +149,7 @@ class StepJoint(Joint):
                 -self.cross.height / 2
             )))
             if self.tapered_heel:
-                heel = heel.rotate((0, 1, 0), 15)
+                heel = heel.rotate(Axis.Y, 15)
             cuts.append(heel)
 
         if cuts:

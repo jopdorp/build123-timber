@@ -38,6 +38,7 @@ classifiers = [
 ]
 dependencies = [
     "build123d>=0.5.0",
+    "ocp-vscode>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -46,6 +47,7 @@ dev = [
     "pytest-cov>=4.0",
     "ruff>=0.1.0",
     "mypy>=1.0",
+    "ipykernel>=6.0",
 ]
 docs = [
     "sphinx>=7.0",

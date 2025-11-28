@@ -3,10 +3,10 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from build123d import Box, Part, Location
+from build123d import Align, Box, Part, Location
 
 from build123_timber.joints.base import Joint, JointTopology
-from build123_timber.joints.utils import shoulder_cuts
+from build123_timber.joints.utils import tenon_cut
 
 
 @dataclass
@@ -37,7 +37,7 @@ class DovetailJoint(Joint):
             self.dovetail_length,
             self.dovetail_width,
             self.dovetail_height,
-            align=("MIN", "CENTER", "CENTER"),
+            align=(Align.MIN, Align.CENTER, Align.CENTER),
         )
 
     def get_main_feature(self) -> Part:
@@ -45,7 +45,7 @@ class DovetailJoint(Joint):
             self.dovetail_width + self.clearance,
             self.dovetail_length + self.clearance,
             self.dovetail_height + self.clearance,
-            align=("CENTER", "MIN", "CENTER"),
+            align=(Align.CENTER, Align.MIN, Align.CENTER),
         )
         x_pos = self.main.length / 2
         y_pos = -self.main.width / 2
@@ -53,7 +53,7 @@ class DovetailJoint(Joint):
         return housing.move(Location((x_pos, y_pos, z_pos)))
 
     def get_cross_feature(self) -> Part:
-        return shoulder_cuts(
+        return tenon_cut(
             self.cross,
             tenon_width=self.dovetail_width,
             tenon_height=self.dovetail_height,
@@ -72,7 +72,7 @@ class HousedDovetailJoint(DovetailJoint):
             self.cross.width,
             self.dovetail_length - self.stop_distance,
             self.housing_depth,
-            align=("CENTER", "MIN", "CENTER"),
+            align=(Align.CENTER, Align.MIN, Align.CENTER),
         )
         x_pos = self.main.length / 2
         y_pos = -self.main.width / 2 + self.stop_distance

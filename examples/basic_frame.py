@@ -1,132 +1,127 @@
+# %%
+import math
+
 from build123d import Location
+from ocp_vscode import show_object, set_defaults, Camera
 
 from build123_timber import (
     Beam,
     Post,
+    Timber,
     TimberModel,
-    TenonMortiseJoint,
     LLapJoint,
-    TLapJoint,
+    TenonMortiseJoint,
+    RafterLayout,
 )
 
+set_defaults(reset_camera=Camera.CENTER)
 
-def create_simple_frame():
-    model = TimberModel(name="SimpleFrame")
+# %%
+model = TimberModel(name="TimberFrameShed")
 
-    frame_width = 2000
-    frame_depth = 1500
-    frame_height = 2400
-    post_size = 100
-    beam_width = 50
-    beam_height = 150
+# Dimensions (mm)
+width = 3000      # X direction (length of shed)
+depth = 4000      # Y direction (front to back)
+wall_height = 2400
+post_w = 100
+beam_w = 100
+beam_h = 150
+rafter_w = 60
+rafter_h = 150
+roof_pitch = 30
 
-    post_positions = [
-        (0, 0),
-        (frame_width, 0),
-        (frame_width, frame_depth),
-        (0, frame_depth),
-    ]
+half_post = post_w / 2
 
-    for i, (x, y) in enumerate(post_positions):
-        post = Post(
-            length=frame_height,
-            width=post_size,
-            height=post_size,
-            name=f"post_{i}",
-            location=Location((x, y, 0), (0, 90, 0)),
-        )
-        model.add_element(post)
+# Four corner posts - vertical
+posts_data = [
+    ("post_fl", half_post, half_post),
+    ("post_fr", width - half_post, half_post),
+    ("post_br", width - half_post, depth - half_post),
+    ("post_bl", half_post, depth - half_post),
+]
 
-    beams_config = [
-        ("beam_front", frame_width, (0, 0, frame_height - beam_height / 2), (0, 0, 0)),
-        ("beam_back", frame_width, (0, frame_depth, frame_height - beam_height / 2), (0, 0, 0)),
-        ("beam_left", frame_depth, (0, 0, frame_height - beam_height / 2), (0, 0, 90)),
-        ("beam_right", frame_depth, (frame_width, 0, frame_height - beam_height / 2), (0, 0, 90)),
-    ]
-
-    for name, length, pos, rot in beams_config:
-        beam = Beam(
-            length=length,
-            width=beam_width,
-            height=beam_height,
-            name=name,
-            location=Location(pos, rot),
-        )
-        model.add_element(beam)
-
-    print(f"Created model: {model}")
-    return model
-
-
-def create_corner_joint_example():
-    beam1 = Beam(length=500, width=50, height=100, name="beam_1")
-    beam2 = Beam(
-        length=500,
-        width=50,
-        height=100,
-        name="beam_2",
-        location=Location((500, 0, 0), (0, 0, 90)),
+posts = {}
+for name, x, y in posts_data:
+    post = Post(
+        length=wall_height,
+        width=post_w,
+        height=post_w,
+        name=name,
+        location=Location((x, y, 0), (0, -90, 0)),
     )
+    posts[name] = post
+    model.add_element(post)
 
-    joint = LLapJoint(main=beam1, cross=beam2)
-    joint.apply()
+# Top plate beams
+beam_front = Beam(
+    length=width,
+    width=beam_w,
+    height=beam_h,
+    name="beam_front",
+    location=Location((0, half_post, wall_height + beam_h / 2)),
+)
+beam_back = Beam(
+    length=width,
+    width=beam_w,
+    height=beam_h,
+    name="beam_back",
+    location=Location((0, depth - half_post, wall_height + beam_h / 2)),
+)
+beam_left = Beam(
+    length=depth,
+    width=beam_w,
+    height=beam_h,
+    name="beam_left",
+    location=Location((half_post, 0, wall_height + beam_h / 2), (0, 0, 90)),
+)
+beam_right = Beam(
+    length=depth,
+    width=beam_w,
+    height=beam_h,
+    name="beam_right",
+    location=Location((width - half_post, 0, wall_height + beam_h / 2), (0, 0, 90)),
+)
 
-    print(f"Corner joint: beam1 features={len(beam1._features)}, beam2 features={len(beam2._features)}")
-    return beam1, beam2
+for beam in [beam_front, beam_back, beam_left, beam_right]:
+    model.add_element(beam)
 
+# Lap joints at corners
+LLapJoint(main=beam_front, cross=beam_left).apply()
+LLapJoint(main=beam_front, cross=beam_right).apply()
+LLapJoint(main=beam_back, cross=beam_left).apply()
+LLapJoint(main=beam_back, cross=beam_right).apply()
 
-def create_mortise_tenon_example():
-    main = Beam(length=800, width=100, height=150, name="main_beam")
-    cross = Beam(
-        length=600,
-        width=80,
-        height=120,
-        name="cross_beam",
-        location=Location((400, -300, 0), (0, 0, 90)),
-    )
+# Mortise-tenon where posts meet beams
+for post in posts.values():
+    TenonMortiseJoint(main=beam_front, cross=post, tenon_length=50).apply()
+    TenonMortiseJoint(main=beam_back, cross=post, tenon_length=50).apply()
 
-    joint = TenonMortiseJoint(
-        main=main,
-        cross=cross,
-        tenon_length=60,
-        tenon_width=30,
-        tenon_height=80,
-    )
-    joint.apply()
+# Ridge beam at center peak
+ridge_height = wall_height + beam_h + (depth / 2) * math.tan(math.radians(roof_pitch))
+ridge_beam = Beam(
+    length=width,
+    width=beam_w,
+    height=beam_h,
+    name="ridge_beam",
+    location=Location((0, depth / 2, ridge_height)),
+)
+model.add_element(ridge_beam)
 
-    print(f"Mortise & tenon: {joint.tenon_length}L x {joint.tenon_width}W x {joint.tenon_height}H")
-    return main, cross
+# Generate rafters using RafterLayout
+rafter_layout = RafterLayout(
+    plate_front=beam_front,
+    plate_back=beam_back,
+    ridge=ridge_beam,
+    rafter_width=rafter_w,
+    rafter_height=rafter_h,
+    pitch=roof_pitch,
+    spacing=600,
+    skip_ends=False,
+    overhang=200,
+)
 
+for rafter, location in rafter_layout.generate():
+    model.add_element(rafter)
 
-def create_t_joint_example():
-    main = Beam(length=1000, width=80, height=120, name="main_beam")
-    cross = Beam(
-        length=500,
-        width=80,
-        height=120,
-        name="cross_beam",
-        location=Location((500, -250, 0), (0, 0, 90)),
-    )
-
-    joint = TLapJoint(main=main, cross=cross)
-    joint.apply()
-
-    print("T-lap joint created")
-    return main, cross
-
-
-if __name__ == "__main__":
-    print("=== Build123-Timber Examples ===\n")
-    print("1. Creating simple frame...")
-    create_simple_frame()
-    print()
-    print("2. Creating corner joint example...")
-    create_corner_joint_example()
-    print()
-    print("3. Creating mortise and tenon example...")
-    create_mortise_tenon_example()
-    print()
-    print("4. Creating T-joint example...")
-    create_t_joint_example()
-    print()
-    print("=== Examples complete ===")
+# %%
+show_object(model.get_compound(), name="timber_frame_shed")
