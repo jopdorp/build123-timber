@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from build123d import Box, Location, Part, Plane, Vector
+from build123d import Align, Box, Location, Part, Plane, Vector
 
 if TYPE_CHECKING:
     from build123_timber.joints.base import Joint
@@ -72,7 +72,7 @@ class Timber:
 
     @property
     def blank(self) -> Part:
-        return Box(self.length, self.width, self.height, align=("MIN", "CENTER", "CENTER"))
+        return Box(self.length, self.width, self.height, align=(Align.MIN, Align.CENTER, Align.CENTER))
 
     @property
     def shape(self) -> Part:

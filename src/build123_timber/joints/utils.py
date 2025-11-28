@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from build123d import Box, Location, Part
+from build123d import Align, Box, Location, Part
 
 from build123_timber.elements import Timber
 
@@ -10,7 +10,7 @@ def create_cutting_box(
     width: float,
     height: float,
     position: tuple[float, float, float] = (0, 0, 0),
-    align: tuple = ("CENTER", "CENTER", "CENTER"),
+    align: tuple = (Align.CENTER, Align.CENTER, Align.CENTER),
 ) -> Part:
     box = Box(length, width, height, align=align)
     if position != (0, 0, 0):
@@ -76,7 +76,7 @@ def mortise_cut(
         width=mortise_depth,
         height=mortise_height + clearance,
         position=(x_position, -timber.width / 2, 0),
-        align=("CENTER", "MIN", "CENTER"),
+        align=(Align.CENTER, Align.MIN, Align.CENTER),
     )
 
 
