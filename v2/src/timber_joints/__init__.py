@@ -7,6 +7,12 @@ from timber_joints.tenon import Tenon
 from timber_joints.shouldered_tenon import ShoulderedTenon
 from timber_joints.dovetail import DovetailInsert
 from timber_joints.half_dovetail import HalfDovetail
+from timber_joints.alignment import (
+    align_beam_on_post,
+    align_beam_in_post,
+    make_post_vertical,
+    create_receiving_cut,
+)
 
 __all__ = [
     "Beam",
@@ -16,4 +22,8 @@ __all__ = [
     "ShoulderedTenon",
     "DovetailInsert",
     "HalfDovetail",
+    "align_beam_on_post",
+    "align_beam_in_post",
+    "make_post_vertical",
+    "create_receiving_cut",
 ]
