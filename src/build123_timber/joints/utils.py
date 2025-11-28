@@ -81,17 +81,69 @@ def mortise_cut(
     mortise_height: float,
     mortise_depth: float,
     x_position: float,
+    from_face: str = "front",
 ) -> Part:
-    # Timber has corner origin at (0,0,0)
-    # Mortise enters from Y=0 face, centered on X and Z
-    # Caller is responsible for adding clearance to dimensions
-    return create_cutting_box(
-        length=mortise_width,
-        width=mortise_depth,
-        height=mortise_height,
-        position=(x_position - mortise_width / 2, 0, (timber.height - mortise_height) / 2),
-        align=(Align.MIN, Align.MIN, Align.MIN),
-    )
+    """Create a mortise (rectangular hole) in the timber.
+    
+    Args:
+        timber: The timber to cut the mortise into
+        mortise_width: Width of mortise opening (perpendicular to depth direction)
+        mortise_height: Height of mortise opening (perpendicular to depth direction)
+        mortise_depth: How deep the mortise goes into the timber
+        x_position: Position along timber length (X) where mortise is centered
+        from_face: Which face the mortise enters from:
+            - "front" (default): Y=0 face, mortise in Y direction
+            - "back": Y=width face, mortise in -Y direction
+            - "top": Z=height face, mortise in -Z direction  
+            - "bottom": Z=0 face, mortise in Z direction
+            - "right": Z=height face for post (same as top conceptually)
+    
+    For "front"/"back": mortise_width is in X, mortise_height is in Z
+    For "top"/"bottom"/"right": mortise_width is in X, mortise_height is in Y
+    """
+    # Timber has corner origin at (0,0,0), extends to (length, width, height)
+    
+    if from_face in ("front",):
+        # Mortise enters from Y=0 face, goes in +Y direction
+        # mortise_width in X, mortise_height in Z, depth in Y
+        return create_cutting_box(
+            length=mortise_width,
+            width=mortise_depth,
+            height=mortise_height,
+            position=(x_position - mortise_width / 2, 0, (timber.height - mortise_height) / 2),
+            align=(Align.MIN, Align.MIN, Align.MIN),
+        )
+    elif from_face in ("back",):
+        # Mortise enters from Y=width face, goes in -Y direction
+        return create_cutting_box(
+            length=mortise_width,
+            width=mortise_depth,
+            height=mortise_height,
+            position=(x_position - mortise_width / 2, timber.width - mortise_depth, (timber.height - mortise_height) / 2),
+            align=(Align.MIN, Align.MIN, Align.MIN),
+        )
+    elif from_face in ("top", "right"):
+        # Mortise enters from Z=height face, goes in -Z direction
+        # For this face: mortise_width maps to Y, mortise_height maps to X
+        # (rotated 90° compared to front face)
+        return create_cutting_box(
+            length=mortise_height,  # Swapped: height goes to X
+            width=mortise_width,    # Swapped: width goes to Y
+            height=mortise_depth,
+            position=(x_position - mortise_height / 2, (timber.width - mortise_width) / 2, timber.height - mortise_depth),
+            align=(Align.MIN, Align.MIN, Align.MIN),
+        )
+    elif from_face in ("bottom",):
+        # Mortise enters from Z=0 face, goes in +Z direction
+        return create_cutting_box(
+            length=mortise_width,
+            width=mortise_height,
+            height=mortise_depth,
+            position=(x_position - mortise_width / 2, (timber.width - mortise_height) / 2, 0),
+            align=(Align.MIN, Align.MIN, Align.MIN),
+        )
+    else:
+        raise ValueError(f"Unknown face: {from_face}. Use 'front', 'back', 'top', 'bottom', or 'right'")
 
 
 def tenon_cut(
@@ -100,20 +152,37 @@ def tenon_cut(
     tenon_height: float,
     tenon_length: float,
     tenon_y_offset: float = 0,
+    at_start: bool = False,
 ) -> Part:
     """Create a cut to form a reduced tenon (smaller than full cross-section).
     
     Removes material from the end of the timber, leaving only the tenon projecting.
     Used when tenon dimensions are smaller than the timber cross-section.
+    
+    Args:
+        timber: The timber to cut
+        tenon_width: Width of tenon (Y direction)
+        tenon_height: Height of tenon (Z direction)
+        tenon_length: Length of tenon projection (X direction)
+        tenon_y_offset: Offset in Y direction from center
+        at_start: If True, tenon at X=0 (start); if False, tenon at X=length (end)
     """
     # Timber has corner origin at (0,0,0)
     # Remove end of timber, then add back the tenon shape
     # The full_end must start exactly where the tenon starts so the tenon stays connected
+    
+    if at_start:
+        # Tenon at start (X=0)
+        x_pos = 0
+    else:
+        # Tenon at end (X=length)
+        x_pos = timber.length - tenon_length
+    
     full_end = create_cutting_box(
         length=tenon_length,
         width=timber.width,
         height=timber.height,
-        position=(timber.length - tenon_length, 0, 0),
+        position=(x_pos, 0, 0),
         align=(Align.MIN, Align.MIN, Align.MIN),
     )
     # Tenon centered on width and height
@@ -123,7 +192,7 @@ def tenon_cut(
         length=tenon_length,
         width=tenon_width,
         height=tenon_height,
-        position=(timber.length - tenon_length, tenon_y, tenon_z),
+        position=(x_pos, tenon_y, tenon_z),
         align=(Align.MIN, Align.MIN, Align.MIN),
     )
     return full_end - tenon

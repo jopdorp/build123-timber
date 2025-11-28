@@ -1,62 +1,12 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from enum import Enum, auto
 from typing import TYPE_CHECKING
 
-from build123d import Location, Vector, Axis, Part, Edge, Compound
+from build123d import Location, Vector, Axis, Edge
 
 if TYPE_CHECKING:
     from build123_timber.elements import Timber
-
-
-class ConnectionEnd(Enum):
-    START = auto()
-    END = auto()
-    CENTER = auto()
-
-
-@dataclass
-class ConnectionPoint:
-    end: ConnectionEnd | None = None
-    position: float | None = None
-    fraction: float | None = None
-
-    @classmethod
-    def start(cls) -> ConnectionPoint:
-        return cls(end=ConnectionEnd.START)
-
-    @classmethod
-    def end(cls) -> ConnectionPoint:
-        return cls(end=ConnectionEnd.END)
-
-    @classmethod
-    def center(cls) -> ConnectionPoint:
-        return cls(end=ConnectionEnd.CENTER)
-
-    @classmethod
-    def at(cls, position: float) -> ConnectionPoint:
-        return cls(position=position)
-
-    @classmethod
-    def at_fraction(cls, fraction: float) -> ConnectionPoint:
-        if not 0 <= fraction <= 1:
-            raise ValueError(f"Fraction must be 0-1, got {fraction}")
-        return cls(fraction=fraction)
-
-    def resolve(self, timber: Timber) -> float:
-        if self.end == ConnectionEnd.START:
-            return 0.0
-        if self.end == ConnectionEnd.END:
-            return timber.length
-        if self.end == ConnectionEnd.CENTER:
-            return timber.length / 2
-        if self.position is not None:
-            return self.position
-        if self.fraction is not None:
-            return timber.length * self.fraction
-        return 0.0
 
 
 def show_lcs(timber: Timber, size: float = 50) -> tuple[Edge, Edge, Edge]:
@@ -229,135 +179,81 @@ def _normalize(v: Vector) -> Vector:
     return Vector(v.X / length, v.Y / length, v.Z / length)
 
 
-class TimberFace(Enum):
-    TOP = auto()
-    BOTTOM = auto()
-    LEFT = auto()
-    RIGHT = auto()
-    START = auto()
-    END = auto()
+def map_tenon_to_mortise_dimensions(
+    tenon_timber: Timber,
+    mortise_timber: Timber,
+    tenon_width: float,
+    tenon_height: float,
+    mortise_face: str = "front",
+) -> tuple[float, float]:
+    """Map tenon dimensions (in tenon timber's local space) to mortise dimensions (in mortise timber's local space).
+    
+    The tenon is defined in the cross timber's local coordinates:
+    - tenon_width: Y direction of tenon timber
+    - tenon_height: Z direction of tenon timber
+    
+    This function determines how these map to the mortise opening dimensions
+    after considering both timbers' rotations and which face the mortise is on.
+    
+    Args:
+        tenon_timber: The timber with the tenon (cross timber)
+        mortise_timber: The timber with the mortise (main timber)
+        tenon_width: Width of tenon in tenon timber's local Y
+        tenon_height: Height of tenon in tenon timber's local Z
+        mortise_face: Which face of mortise timber the mortise is on:
+            - "front"/"back": mortise opening in X and Z
+            - "top"/"bottom"/"right": mortise opening in X and Y
+    
+    Returns:
+        (mortise_dim1, mortise_dim2) dimensions for the mortise opening
+        - For front/back face: (width in X, height in Z)
+        - For top/bottom/right face: (width in X, height in Y)
+    """
+    # Get rotation info for both timbers
+    tenon_rot = tuple(tenon_timber.location.orientation)
+    mortise_rot = tuple(mortise_timber.location.orientation)
+    
+    # Transform tenon's local Y and Z to world coordinates
+    tenon_y_world = _rotate_vector(Vector(0, 1, 0), *tenon_rot)
+    tenon_z_world = _rotate_vector(Vector(0, 0, 1), *tenon_rot)
+    
+    # Get mortise timber's local axes in world coordinates
+    mortise_x_world = _rotate_vector(Vector(1, 0, 0), *mortise_rot)
+    mortise_y_world = _rotate_vector(Vector(0, 1, 0), *mortise_rot)
+    mortise_z_world = _rotate_vector(Vector(0, 0, 1), *mortise_rot)
+    
+    # Determine which mortise axes define the opening based on face
+    if mortise_face in ("front", "back"):
+        # Mortise opening is in X and Z of mortise timber
+        axis1_world = mortise_x_world  # width direction
+        axis2_world = mortise_z_world  # height direction
+    else:  # top, bottom, right
+        # Mortise opening is in X and Y of mortise timber
+        axis1_world = mortise_x_world  # width direction
+        axis2_world = mortise_y_world  # height direction
+    
+    # Check how tenon Y and Z align with mortise opening axes
+    tenon_y_to_axis1 = abs(_dot(tenon_y_world, axis1_world))
+    tenon_y_to_axis2 = abs(_dot(tenon_y_world, axis2_world))
+    tenon_z_to_axis1 = abs(_dot(tenon_z_world, axis1_world))
+    tenon_z_to_axis2 = abs(_dot(tenon_z_world, axis2_world))
+    
+    # Determine mapping based on strongest alignment
+    # tenon_width is in tenon Y, tenon_height is in tenon Z
+    
+    # Check if tenon Y aligns more with axis1 or axis2
+    if tenon_y_to_axis1 > tenon_y_to_axis2:
+        # tenon Y -> axis1 (mortise dim1), tenon Z -> axis2 (mortise dim2)
+        mortise_dim1 = tenon_width
+        mortise_dim2 = tenon_height
+    else:
+        # tenon Y -> axis2 (mortise dim2), tenon Z -> axis1 (mortise dim1)
+        mortise_dim1 = tenon_height
+        mortise_dim2 = tenon_width
+    
+    return (mortise_dim1, mortise_dim2)
 
 
-class CrossOrientation(Enum):
-    PERPENDICULAR = auto()
-    PARALLEL = auto()
-    ANGLED = auto()
-
-
-@dataclass
-class JointAlignment:
-    """Legacy alignment class - use auto_align() for new code."""
-    main_point: ConnectionPoint | None = None
-    main_face: TimberFace = TimberFace.TOP
-    cross_point: ConnectionPoint | None = None
-    cross_face: TimberFace = TimberFace.END
-    orientation: CrossOrientation = CrossOrientation.PERPENDICULAR
-    angle: float = 90.0
-    offset: tuple[float, float, float] = (0, 0, 0)
-
-    def compute_cross_location(self, main: Timber, cross: Timber) -> Location:
-        main_x = self.main_point.resolve(main) if self.main_point else main.length / 2
-        cross_conn = self.cross_point.resolve(cross) if self.cross_point else 0.0
-
-        main_pos = main.location.position
-        main_rot = tuple(main.location.orientation)
-        main_z_rot = main_rot[2] if len(main_rot) >= 3 else 0.0
-
-        local_conn_x, local_conn_y = _rotate_z(main_x, 0, main_z_rot)
-        conn_x = main_pos.X + local_conn_x
-        conn_y = main_pos.Y + local_conn_y
-        conn_z = main_pos.Z
-
-        face_offset_local = self._get_face_offset(main, cross)
-        face_off_x, face_off_y = _rotate_z(face_offset_local[0], face_offset_local[1], main_z_rot)
-        face_off_z = face_offset_local[2]
-
-        cross_rotation = self._compute_cross_rotation(main_z_rot, cross)
-
-        cross_offset = self._get_cross_origin_offset(cross, cross_conn)
-        rot_z = cross_rotation[2]
-        cross_off_x, cross_off_y = _rotate_z(cross_offset[0], cross_offset[1], rot_z)
-        cross_off_z = cross_offset[2]
-
-        final_x = conn_x + face_off_x - cross_off_x + self.offset[0]
-        final_y = conn_y + face_off_y - cross_off_y + self.offset[1]
-        final_z = conn_z + face_off_z - cross_off_z + self.offset[2]
-
-        return Location((final_x, final_y, final_z), cross_rotation)
-
-    def _get_face_offset(self, main: Timber, cross: Timber) -> tuple[float, float, float]:
-        if self.main_face == TimberFace.TOP:
-            return (0, 0, main.height / 2)
-        elif self.main_face == TimberFace.BOTTOM:
-            return (0, 0, -main.height / 2)
-        elif self.main_face == TimberFace.LEFT:
-            return (0, -main.width / 2, 0)
-        elif self.main_face == TimberFace.RIGHT:
-            return (0, main.width / 2, 0)
-        elif self.main_face == TimberFace.START:
-            return (-main.width / 2, 0, 0)
-        elif self.main_face == TimberFace.END:
-            return (main.width / 2, 0, 0)
-        return (0, 0, 0)
-
-    def _get_cross_origin_offset(self, cross: Timber, cross_conn: float) -> tuple[float, float, float]:
-        if self.cross_face == TimberFace.END:
-            return (cross_conn, 0, 0)
-        elif self.cross_face == TimberFace.START:
-            return (cross_conn, 0, 0)
-        elif self.cross_face == TimberFace.TOP:
-            return (cross_conn, 0, cross.height / 2)
-        elif self.cross_face == TimberFace.BOTTOM:
-            return (cross_conn, 0, -cross.height / 2)
-        elif self.cross_face == TimberFace.LEFT:
-            return (cross_conn, -cross.width / 2, 0)
-        elif self.cross_face == TimberFace.RIGHT:
-            return (cross_conn, cross.width / 2, 0)
-        return (cross_conn, 0, 0)
-
-    def _compute_cross_rotation(self, main_z_rot: float, cross: Timber) -> tuple[float, float, float]:
-        rx, ry, rz = 0.0, 0.0, 0.0
-
-        if self.orientation == CrossOrientation.PERPENDICULAR:
-            rz = main_z_rot + 90
-        elif self.orientation == CrossOrientation.PARALLEL:
-            rz = main_z_rot
-        elif self.orientation == CrossOrientation.ANGLED:
-            rz = main_z_rot + self.angle
-
-        if self.cross_face == TimberFace.TOP:
-            rx = 90
-        elif self.cross_face == TimberFace.BOTTOM:
-            rx = -90
-
-        if self.main_face == TimberFace.TOP and self.cross_face == TimberFace.END:
-            rx = -90
-            rz = main_z_rot + 90 if self.orientation == CrossOrientation.PERPENDICULAR else main_z_rot
-
-        return (rx, ry, rz)
-
-
-def _rotate_z(x: float, y: float, angle_deg: float) -> tuple[float, float]:
-    angle_rad = math.radians(angle_deg)
-    cos_a = math.cos(angle_rad)
-    sin_a = math.sin(angle_rad)
-    return (x * cos_a - y * sin_a, x * sin_a + y * cos_a)
-
-
-class VerticalAlign(Enum):
-    TOP = auto()
-    BOTTOM = auto()
-    CENTER = auto()
-    FLUSH_TOP = auto()
-    FLUSH_BOTTOM = auto()
-
-
-class HorizontalAlign(Enum):
-    LEFT = auto()
-    RIGHT = auto()
-    CENTER = auto()
-
-
-START = ConnectionPoint.start()
-END = ConnectionPoint.end()
-CENTER = ConnectionPoint.center()
+def _dot(a: Vector, b: Vector) -> float:
+    """Dot product of two vectors."""
+    return a.X * b.X + a.Y * b.Y + a.Z * b.Z

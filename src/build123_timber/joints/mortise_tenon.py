@@ -22,6 +22,11 @@ class TenonMortiseJoint(Joint):
     
     By default, creates a tenon that is 1/3 the timber width and 2/3 the timber height,
     which is the classic proportioning for a strong mortise and tenon joint.
+    
+    Position control:
+    - mortise_x_position: Where to place mortise along main timber (default: center)
+    - tenon_at_start: Put tenon at start (X=0) instead of end (X=length) of cross timber
+    - mortise_face: Which face of main timber the mortise enters from
     """
     tenon_length: float = 50.0
     tenon_width: float | None = None  # None = 1/3 timber width
@@ -31,6 +36,9 @@ class TenonMortiseJoint(Joint):
     through_tenon: bool = False
     clearance: float = 0.5
     topology: JointTopology = JointTopology.T
+    mortise_x_position: float | None = None  # None = center of main timber
+    tenon_at_start: bool = False  # If True, tenon at X=0 instead of X=length
+    mortise_face: str = "front"  # "front", "back", "top", "bottom", "right"
 
     def __post_init__(self) -> None:
         # Default: classic proportions (1/3 width, 2/3 height)
@@ -75,15 +83,18 @@ class TenonMortiseJoint(Joint):
 
     def get_main_feature(self) -> Part:
         mortise_depth = (
-            self.main.width + 10 if self.through_tenon
+            self.main.height + 10 if self.through_tenon and self.mortise_face in ("top", "bottom", "right")
+            else self.main.width + 10 if self.through_tenon
             else self.tenon_length + self.clearance
         )
+        x_pos = self.mortise_x_position if self.mortise_x_position is not None else self.main.length / 2
         return mortise_cut(
             self.main,
             mortise_width=self.tenon_width + self.clearance,
             mortise_height=self.tenon_height + self.clearance,
             mortise_depth=mortise_depth,
-            x_position=self.main.length / 2,
+            x_position=x_pos,
+            from_face=self.mortise_face,
         )
 
     def get_cross_feature(self) -> Part:
@@ -92,6 +103,7 @@ class TenonMortiseJoint(Joint):
             tenon_width=self.tenon_width,
             tenon_height=self.tenon_height,
             tenon_length=self.tenon_length,
+            at_start=self.tenon_at_start,
         )
 
 
