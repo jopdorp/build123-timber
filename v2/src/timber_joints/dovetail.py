@@ -2,8 +2,9 @@
 
 import math
 from dataclasses import dataclass
-from build123d import Align, Box, Part, Location, Polyline, make_face, extrude, loft, Sketch, Rectangle, Plane
+from build123d import Align, Box, Part, Location
 from timber_joints.beam import Beam
+from timber_joints.utils import create_dovetail_cut, calculate_dovetail_taper
 
 
 @dataclass
@@ -45,43 +46,14 @@ class DovetailInsert:
         
         Returns: (base_width, tip_width) where tip_width > base_width
         """
-        # Taper calculation: for each unit of length, width changes by 2*tan(angle)
-        taper = math.tan(math.radians(self.cone_angle)) * self.dovetail_length
-        base_width = self.dovetail_width  # Width at base (where meets beam)
-        tip_width = self.dovetail_width + 2 * taper  # Width at tip (wider)
-        
+        taper = calculate_dovetail_taper(self.cone_angle, self.dovetail_length) / 2
+        base_width = self.dovetail_width
+        tip_width = self.dovetail_width + 2 * taper
         return base_width, tip_width
-
-    def _create_dovetail_shape(self) -> Part:
-        """Create the tapered dovetail solid using loft between two rectangles."""
-        base_width, tip_width = self._get_widths()
-        
-        # Z offset to center dovetail vertically
-        z_offset = (self.beam.height - self.dovetail_height) / 2
-        
-        # Create the base rectangle (narrow, at beam junction)
-        base_sketch = Sketch() + Rectangle(base_width, self.dovetail_height)
-        
-        # Create the tip rectangle (wider, at outer end)
-        tip_sketch = Sketch() + Rectangle(tip_width, self.dovetail_height)
-        
-        # Position the sketches in Y-Z plane (perpendicular to X axis)
-        # Base is at X=0, tip is at X=dovetail_length
-        base_face = Plane.YZ * base_sketch
-        tip_face = Plane.YZ.offset(self.dovetail_length) * tip_sketch
-        
-        # Loft between the two faces
-        dovetail = loft([base_face, tip_face])
-        
-        # Move to correct position (centered in Y, offset in Z)
-        dovetail = dovetail.move(Location((0, self.beam.width / 2, z_offset + self.dovetail_height / 2)))
-        
-        return dovetail
 
     @property
     def shape(self) -> Part:
         """Create the dovetail insert by removing material around the tapered projection."""
-        # Start with the full beam
         result = self.beam.shape
         
         # Determine position based on at_start
@@ -99,8 +71,15 @@ class DovetailInsert:
         )
         end_section = end_section.move(Location((x_pos, 0, 0)))
         
-        # Create the tapered dovetail shape and position it
-        dovetail_keep = self._create_dovetail_shape()
+        # Create the tapered dovetail shape centered in beam cross-section
+        dovetail_keep = create_dovetail_cut(
+            base_width=self.dovetail_width,
+            height=self.dovetail_height,
+            length=self.dovetail_length,
+            cone_angle=self.cone_angle,
+            y_center=self.beam.width / 2,
+            z_center=self.beam.height / 2,
+        )
         dovetail_keep = dovetail_keep.move(Location((x_pos, 0, 0)))
         
         # Material to remove = end_section - dovetail_keep

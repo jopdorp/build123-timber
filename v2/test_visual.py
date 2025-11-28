@@ -118,3 +118,54 @@ show_object(beam.shape, name="Beam blank", options={"color": "orange", "alpha": 
 show_object(dovetail.shape.move(Location((400, 0, 0))), name="Dovetail Insert result", options={"color": "red"})
 
 # %%
+# 6. Lap X-Section - lap cut at a cross-section point along the beam
+# Used for cross-lap joints where two beams intersect
+
+from ocp_vscode import show_object
+from build123d import Location
+from timber_joints.beam import Beam
+from timber_joints.lap_x_section import LapXSection
+
+beam = Beam(length=300, width=100, height=100)
+lap_x = LapXSection(
+    beam=beam,
+    cut_depth=50,  # Half depth
+    cut_length=100,  # Width of intersecting beam
+    x_position=150,  # Center of beam
+    from_top=True
+)
+
+print("=== 6. Lap X-Section (cross lap) ===")
+print(f"Cut depth: {lap_x.cut_depth}mm (from top)")
+print(f"Cut length: {lap_x.cut_length}mm at X={lap_x.x_position}mm")
+
+show_object(beam.shape, name="Beam blank", options={"color": "orange", "alpha": 0.3})
+show_object(lap_x.shape.move(Location((400, 0, 0))), name="Lap X-Section result", options={"color": "cyan"})
+
+# %%
+# 7. Half-Dovetail - dovetail insert at top or bottom of beam
+# Same as dovetail insert but positioned at top/bottom instead of centered
+
+from ocp_vscode import show_object
+from build123d import Location
+from timber_joints.beam import Beam
+from timber_joints.half_dovetail import HalfDovetail
+
+beam = Beam(length=300, width=100, height=100)
+half_dt = HalfDovetail(
+    beam=beam,
+    dovetail_width=50,
+    dovetail_height=50,
+    dovetail_length=70,
+    dovetail_angle=10.0,
+    at_start=False,
+    at_top=True
+)
+
+print("=== 7. Half-Dovetail ===")
+print(f"Dovetail: {half_dt.dovetail_length}L × {half_dt.dovetail_height}H at top")
+
+show_object(beam.shape, name="Beam blank", options={"color": "orange", "alpha": 0.3})
+show_object(half_dt.shape.move(Location((400, 0, 0))), name="Half-Dovetail result", options={"color": "magenta"})
+
+# %%

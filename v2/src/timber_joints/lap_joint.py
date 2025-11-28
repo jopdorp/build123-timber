@@ -1,8 +1,9 @@
 """Lap joint - positive/inserting part only."""
 
 from dataclasses import dataclass
-from build123d import Align, Box, Part, Location
+from build123d import Part
 from timber_joints.beam import Beam
+from timber_joints.utils import create_lap_cut
 
 
 @dataclass
@@ -34,32 +35,19 @@ class LapJoint:
     @property
     def shape(self) -> Part:
         """Create the lap joint shape by removing material from beam end."""
-        # Start with the full beam
         result = self.beam.shape
         
-        # Create the material to remove
-        # Position at the end of the beam
+        # Cut at end of beam
         x_pos = self.beam.length - self.cut_length
         
-        if self.from_top:
-            # Cut from top: remove material from top face
-            z_pos = self.beam.height - self.cut_depth
-            cut = Box(
-                self.cut_length,
-                self.beam.width,
-                self.cut_depth,
-                align=(Align.MIN, Align.MIN, Align.MIN)
-            )
-            cut = cut.move(Location((x_pos, 0, z_pos)))
-        else:
-            # Cut from bottom: remove material from bottom face
-            cut = Box(
-                self.cut_length,
-                self.beam.width,
-                self.cut_depth,
-                align=(Align.MIN, Align.MIN, Align.MIN)
-            )
-            cut = cut.move(Location((x_pos, 0, 0)))
+        cut = create_lap_cut(
+            beam_width=self.beam.width,
+            beam_height=self.beam.height,
+            cut_depth=self.cut_depth,
+            cut_length=self.cut_length,
+            x_position=x_pos,
+            from_top=self.from_top,
+        )
         
         return result - cut
 
