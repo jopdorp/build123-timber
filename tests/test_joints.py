@@ -464,6 +464,88 @@ class TestTenonMortiseJoint:
         """Cross timber with tenon should remain one connected solid."""
         main, cross, joint = create_tenon_mortise_joint_applied()
         assert len(cross.shape.solids()) == 1, "Tenon should be connected to timber body"
+
+
+class TestHousedTenonMortiseJoint:
+    """Tests for housed mortise and tenon joint.
+    
+    Housing creates a shallow seat on the main timber while shortening the
+    tenon projection on the cross timber. Net expectations:
+    - Main timber removes mortise + housing (more than non-housed main)
+    - Cross timber removes LESS than non-housed (tenon shortened by housing depth)
+    """
+    
+    def test_housed_tenon_mortise_creation(self):
+        """Basic creation with housing_depth parameter."""
+        main, cross, joint = create_housed_tenon_mortise_joint_applied()
+        assert joint.housing_depth == 10
+        assert joint.tenon_length == 50
+    
+    def test_housed_main_removes_more_than_non_housed(self):
+        """Housed main has extra housing removed compared to non-housed."""
+        from build123_timber import Timber
+        from build123_timber.joints import TenonMortiseJoint
+        
+        # Create non-housed with same main size for fair comparison
+        main_nh = Timber.beam(length=400, width=120, height=120)
+        cross_nh = Timber.beam(length=300, width=80, height=80)
+        joint_nh = TenonMortiseJoint(main=main_nh, cross=cross_nh, tenon_length=50)
+        joint_nh.apply()
+        
+        # Get housed
+        main_h, cross_h, joint_h = create_housed_tenon_mortise_joint_applied()
+        
+        nh_removal = main_nh.blank.volume - main_nh.shape.volume
+        h_removal = main_h.blank.volume - main_h.shape.volume
+        
+        # Mortise + housing volumes should match removal
+        housing_width = cross_h.width + joint_h.clearance
+        housing_length = cross_h.height + joint_h.clearance
+        housing_volume = housing_width * joint_h.housing_depth * housing_length
+        effective_tenon_length = joint_h.tenon_length - joint_h.housing_depth
+        mortise_width = joint_h.tenon_width + joint_h.clearance
+        mortise_height = joint_h.tenon_height + joint_h.clearance
+        mortise_depth = effective_tenon_length + joint_h.housing_depth + joint_h.clearance
+        mortise_volume = mortise_width * mortise_height * mortise_depth
+        overlap_depth = min(joint_h.housing_depth, mortise_depth)
+        overlap_volume = mortise_width * mortise_height * overlap_depth
+        expected_removal = housing_volume + mortise_volume - overlap_volume
+
+        assert h_removal > nh_removal, \
+            f"Housed main should remove more: housed={h_removal:.0f}, non-housed={nh_removal:.0f}"
+        assert h_removal == pytest.approx(expected_removal, rel=0.02), \
+            f"Main removal mismatch: {h_removal:.0f} vs expected {expected_removal:.0f}"
+    
+    def test_cross_volume_reduced_by_housing(self):
+        """Cross timber removes less material because tenon is shortened by housing."""
+        # Get both housed and non-housed
+        nh_main, nh_cross, nh_joint = create_tenon_mortise_joint_applied()
+        h_main, h_cross, h_joint = create_housed_tenon_mortise_joint_applied()
+        
+        # Both should have same cross timber dimensions
+        assert nh_cross.width == h_cross.width
+        assert nh_cross.height == h_cross.height
+        
+        nh_actual = nh_cross.blank.volume - nh_cross.shape.volume
+        h_actual = h_cross.blank.volume - h_cross.shape.volume
+        
+        assert h_actual < nh_actual, \
+            f"Housed cross should remove less: housed={h_actual:.0f}, non-housed={nh_actual:.0f}"
+
+        effective_tenon_length = h_joint.tenon_length - h_joint.housing_depth
+        full_cut = effective_tenon_length * h_cross.width * h_cross.height
+        tenon_volume = effective_tenon_length * h_joint.tenon_width * h_joint.tenon_height
+        expected_removal = full_cut - tenon_volume
+
+        assert h_actual == pytest.approx(expected_removal, rel=0.02), \
+            f"Cross removal mismatch: {h_actual:.0f} vs expected {expected_removal:.0f}"
+    
+    def test_cross_timber_is_single_solid(self):
+        """Cross timber with shoulder+tenon should remain one connected solid."""
+        main, cross, joint = create_housed_tenon_mortise_joint_applied()
+        assert len(cross.shape.solids()) == 1, "Shoulder+tenon should be connected to timber body"
+
+
 class TestDovetailJoint:
     def test_dovetail_creation(self, main_timber, cross_timber):
         joint = DovetailJoint(main=main_timber, cross=cross_timber, dovetail_length=50)

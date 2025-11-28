@@ -116,12 +116,17 @@ class HousedTenonMortiseJoint(Joint):
     The cross timber has a shoulder that sits into the housing.
     
     Main timber gets:
-    - Housing: shallow recess on Y=0 face
+    - Housing: shallow recess for the beam to sit into
     - Mortise: deeper hole inside the housing for the tenon
     
     Cross timber gets:
     - Shoulder: material removed to create step that fits into housing  
     - Tenon: projecting piece that fits into mortise
+    
+    Position control:
+    - mortise_x_position: Where to place mortise/housing along main timber (default: center)
+    - tenon_at_start: Put tenon at start (X=0) instead of end (X=length) of cross timber
+    - mortise_face: Which face of main timber the mortise/housing enters from
     """
     tenon_length: float = 50.0
     tenon_width: float | None = None  # None = 1/3 timber width
@@ -132,6 +137,9 @@ class HousedTenonMortiseJoint(Joint):
     through_tenon: bool = False
     clearance: float = 0.5
     topology: JointTopology = JointTopology.T
+    mortise_x_position: float | None = None  # None = center of main timber
+    tenon_at_start: bool = False  # If True, tenon at X=0 instead of X=length
+    mortise_face: str = "front"  # "front", "back", "top", "bottom", "right"
 
     def __post_init__(self) -> None:
         # Default: classic proportions (1/3 width, 2/3 height)
@@ -146,45 +154,76 @@ class HousedTenonMortiseJoint(Joint):
             raise ValueError("Tenon height cannot exceed cross timber height")
         if self.housing_depth >= self.main.width:
             raise ValueError("Housing depth cannot exceed main timber width")
+        if self.housing_depth >= self.tenon_length:
+            raise ValueError("Housing depth must be less than tenon length")
 
     def get_main_feature(self) -> Part:
-        """Create combined housing + mortise cut for main timber."""
+        """Create combined housing + mortise cut for main timber.
+        
+        Housing is a shallow recess for the shoulder to sit into.
+        Mortise is the deeper hole for the tenon.
+        Mortise depth = tenon_length (housing is separate, not added).
+        """
+        x_pos = self.mortise_x_position if self.mortise_x_position is not None else self.main.length / 2
+        
+        effective_tenon_length = self.tenon_length - self.housing_depth
+
         # Housing: full width/height of cross timber, shallow depth
         housing = housing_cut(
             self.main,
             housing_width=self.cross.width + self.clearance,
             housing_depth=self.housing_depth,
             housing_length=self.cross.height + self.clearance,
-            x_position=self.main.length / 2,
+            x_position=x_pos,
+            from_face=self.mortise_face,
         )
         
-        # Mortise: inside the housing, deeper
+        # Mortise: inside the housing, goes tenon_length deep
+        # For through tenon, goes all the way through
         mortise_depth = (
-            self.main.width + 10 if self.through_tenon
-            else self.tenon_length + self.clearance + self.housing_depth
+            self.main.height + 10 if self.through_tenon and self.mortise_face in ("top", "bottom", "right")
+            else self.main.width + 10 if self.through_tenon
+            else effective_tenon_length + self.housing_depth + self.clearance
         )
         mortise = mortise_cut(
             self.main,
             mortise_width=self.tenon_width + self.clearance,
             mortise_height=self.tenon_height + self.clearance,
             mortise_depth=mortise_depth,
-            x_position=self.main.length / 2,
+            x_position=x_pos,
+            from_face=self.mortise_face,
         )
         
         return housing + mortise
 
     def get_cross_feature(self) -> Part:
-        """Create shoulder + tenon cut for cross timber.
+        """Create tenon cut with shoulder for housed joint.
         
-        The shoulder is the step that sits into the housing.
-        The tenon projects from the shoulder into the mortise.
+        The housing in main timber creates a recess. The cross timber has a 
+        matching shoulder (full cross-section) that sits into this housing.
+        
+        For housed joint, we need to cut a longer section and add back both:
+        - The tenon shape (tenon_length long, tenon_width x tenon_height)
+        - The shoulder shape (housing_depth long, full cross-section)
+        
+        Result: housed cross removes MORE material than non-housed from the cut zone,
+        but the net effect is that only the shoulder area is "exposed" beyond 
+        what a standard tenon cut would expose.
+        
+        Cut zone: tenon_length + housing_depth
+        Material removed = full_cut - tenon - shoulder
         """
-        return tenon_cut(
+        from build123_timber.joints.utils import tenon_cut
+
+        effective_tenon_length = self.tenon_length - self.housing_depth
+        standard_tenon_cut = tenon_cut(
             self.cross,
             tenon_width=self.tenon_width,
             tenon_height=self.tenon_height,
-            tenon_length=self.tenon_length + self.housing_depth,
+            tenon_length=effective_tenon_length,
+            at_start=self.tenon_at_start,
         )
+        return standard_tenon_cut
 
 
 @dataclass

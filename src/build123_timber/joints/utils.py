@@ -216,27 +216,64 @@ def housing_cut(
     housing_depth: float,
     housing_length: float,
     x_position: float,
+    from_face: str = "front",
 ) -> Part:
     """Create a housing (shallow recess) in the timber surface.
     
-    The housing is a shallow rectangular pocket on the Y=0 face,
-    used to seat the shoulder of a cross timber. Centered on X and Z.
+    The housing is a shallow rectangular pocket used to seat the shoulder 
+    of a cross timber. Centered on X and the secondary axis.
     
     Args:
         timber: The timber to cut the housing into
         housing_width: Width of housing in X direction
-        housing_depth: Depth of housing into timber (Y direction)  
-        housing_length: Length of housing in Z direction (usually cross timber height)
+        housing_depth: Depth of housing into timber
+        housing_length: Length of housing (perpendicular to X and depth)
         x_position: X position of housing center
+        from_face: Which face the housing is on:
+            - "front" (default): Y=0 face, depth in Y, length in Z
+            - "back": Y=width face, depth in -Y, length in Z
+            - "top"/"right": Z=height face, depth in -Z, length in Y
+            - "bottom": Z=0 face, depth in Z, length in Y
     """
-    # Housing enters from Y=0 face, centered on X and Z (like mortise)
-    return create_cutting_box(
-        length=housing_width,
-        width=housing_depth,
-        height=housing_length,
-        position=(x_position - housing_width / 2, 0, (timber.height - housing_length) / 2),
-        align=(Align.MIN, Align.MIN, Align.MIN),
-    )
+    if from_face in ("front",):
+        # Housing on Y=0 face, depth in Y, length in Z
+        return create_cutting_box(
+            length=housing_width,
+            width=housing_depth,
+            height=housing_length,
+            position=(x_position - housing_width / 2, 0, (timber.height - housing_length) / 2),
+            align=(Align.MIN, Align.MIN, Align.MIN),
+        )
+    elif from_face in ("back",):
+        # Housing on Y=width face, depth in -Y, length in Z
+        return create_cutting_box(
+            length=housing_width,
+            width=housing_depth,
+            height=housing_length,
+            position=(x_position - housing_width / 2, timber.width - housing_depth, (timber.height - housing_length) / 2),
+            align=(Align.MIN, Align.MIN, Align.MIN),
+        )
+    elif from_face in ("top", "right"):
+        # Housing on Z=height face, depth in -Z, length in Y
+        # Swap dimensions like mortise_cut does for this face
+        return create_cutting_box(
+            length=housing_length,  # Swapped: length goes to X
+            width=housing_width,    # Swapped: width goes to Y  
+            height=housing_depth,
+            position=(x_position - housing_length / 2, (timber.width - housing_width) / 2, timber.height - housing_depth),
+            align=(Align.MIN, Align.MIN, Align.MIN),
+        )
+    elif from_face in ("bottom",):
+        # Housing on Z=0 face, depth in Z, length in Y
+        return create_cutting_box(
+            length=housing_length,
+            width=housing_width,
+            height=housing_depth,
+            position=(x_position - housing_length / 2, (timber.width - housing_width) / 2, 0),
+            align=(Align.MIN, Align.MIN, Align.MIN),
+        )
+    else:
+        raise ValueError(f"Unknown face: {from_face}. Use 'front', 'back', 'top', 'bottom', or 'right'")
 
 
 def angled_housing_cut(
