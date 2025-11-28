@@ -126,6 +126,37 @@ def create_housed_tenon_mortise_joint_applied():
     return main, cross, joint
 
 
+def create_angled_tenon_mortise_joint_cuts():
+    """Create angled mortise-tenon joint and return (main, cross, main_cut, cross_cut, joint).
+    
+    Main: 400×120×120 beam (larger to accommodate housing), receives angled housing + mortise
+    Cross: 300×80×80 beam, angled shoulder + tenon formed at end
+    Housing: 15mm max depth, 15 degree angle
+    Tenon: 50 length, ~26.67 width (1/3), ~53.33 height (2/3) - classic proportions
+    """
+    main = Timber.beam(length=400, width=120, height=120)  # Larger main for housing
+    cross = Timber.beam(length=300, width=80, height=80)
+    from build123_timber.joints import AngledTenonMortiseJoint
+    joint = AngledTenonMortiseJoint(
+        main=main, cross=cross, tenon_length=50, housing_depth=15, shoulder_angle=15
+    )
+    main_cut = joint.get_main_feature()
+    cross_cut = joint.get_cross_feature()
+    return main, cross, main_cut, cross_cut, joint
+
+
+def create_angled_tenon_mortise_joint_applied():
+    """Create angled mortise-tenon joint, apply it, return (main, cross, joint)."""
+    main = Timber.beam(length=400, width=120, height=120)  # Larger main for housing
+    cross = Timber.beam(length=300, width=80, height=80)
+    from build123_timber.joints import AngledTenonMortiseJoint
+    joint = AngledTenonMortiseJoint(
+        main=main, cross=cross, tenon_length=50, housing_depth=15, shoulder_angle=15
+    )
+    joint.apply()
+    return main, cross, joint
+
+
 # Note: removed "shouldered" variants - all mortise/tenon joints have reduced tenons by default
 
 

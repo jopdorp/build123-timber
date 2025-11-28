@@ -231,3 +231,43 @@ show_object(main_applied.shape.moved(Location((500, 0, 0))), name="Main result",
 show_object(cross_applied.shape.moved(Location((500, 200, 0))), name="Cross result", options={"color": "blue"})
 
 # %%
+# 8. AngledTenonMortiseJoint - angled housing + mortise in main, shoulder + tenon on cross
+# Main gets angled (wedge-shaped) housing + mortise
+# Cross gets shoulder + tenon (shoulder matches the angled housing)
+
+from ocp_vscode import show_object
+from build123d import Location
+from test_joints import create_angled_tenon_mortise_joint_cuts, create_angled_tenon_mortise_joint_applied
+
+# Get uncut blanks and cut shapes
+main, cross, main_cut, cross_cut, joint = create_angled_tenon_mortise_joint_cuts()
+
+# Get applied result (separate instances)
+main_applied, cross_applied, _ = create_angled_tenon_mortise_joint_applied()
+
+main_bbox = main_cut.bounding_box()
+cross_bbox = cross_cut.bounding_box()
+main_removed = main_applied.blank.volume - main_applied.shape.volume
+cross_removed = cross_applied.blank.volume - cross_applied.shape.volume
+
+print("=== 8. AngledTenonMortiseJoint ===")
+print(f"Angled Housing+Mortise X: {main_bbox.min.X:.1f}-{main_bbox.max.X:.1f}")
+print(f"Angled Housing+Mortise Y: {main_bbox.min.Y:.1f}-{main_bbox.max.Y:.1f} (depth into main)")
+print(f"Angled Housing+Mortise Z: {main_bbox.min.Z:.1f}-{main_bbox.max.Z:.1f}")
+print(f"Main volume removed: {main_removed:.0f}")
+print(f"Shoulder+Tenon X: {cross_bbox.min.X:.1f}-{cross_bbox.max.X:.1f}")
+print(f"Cross volume removed: {cross_removed:.0f}")
+print(f"Tenon: {joint.tenon_length}L × {joint.tenon_width:.1f}W × {joint.tenon_height:.1f}H")
+print(f"Housing depth: {joint.housing_depth}mm, Shoulder angle: {joint.shoulder_angle}°")
+
+# Left side: uncut blanks with cut shapes (offset in Y)
+show_object(main.blank, name="Main blank (yellow)", options={"color": "yellow", "alpha": 0.5})
+show_object(cross.blank.moved(Location((0, 200, 0))), name="Cross blank", options={"color": "blue", "alpha": 0.5})
+show_object(main_cut, name="Main cut (angled housing+mortise)", options={"color": "red"})
+show_object(cross_cut.moved(Location((0, 200, 0))), name="Cross cut (shoulder+tenon)", options={"color": "darkblue"})
+
+# Right side: applied result (offset in X)
+show_object(main_applied.shape.moved(Location((500, 0, 0))), name="Main result", options={"color": "yellow"})
+show_object(cross_applied.shape.moved(Location((500, 200, 0))), name="Cross result", options={"color": "blue"})
+
+# %%

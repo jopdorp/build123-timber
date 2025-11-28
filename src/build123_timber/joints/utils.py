@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from build123d import Align, Box, Location, Part
+import math
+
+from build123d import Align, Box, Location, Part, extrude, Polyline, make_face
 
 from build123_timber.elements import Timber
 
@@ -166,3 +168,139 @@ def housing_cut(
         position=(x_position - housing_width / 2, 0, (timber.height - housing_length) / 2),
         align=(Align.MIN, Align.MIN, Align.MIN),
     )
+
+
+def angled_housing_cut(
+    timber: Timber,
+    housing_width: float,
+    housing_depth: float,
+    housing_length: float,
+    x_position: float,
+    shoulder_angle: float,
+) -> Part:
+    """Create an angled housing (wedge-shaped recess) in the timber surface.
+    
+    The housing is a triangular wedge on the Y=0 face. One side is flush with
+    the surface (depth 0), the other side is at housing_depth. Used for angled 
+    joints where the cross timber meets the main at an angle.
+    
+    Args:
+        timber: The timber to cut the housing into
+        housing_width: Width of housing in X direction
+        housing_depth: Maximum depth of housing into timber (Y direction) at the deep side
+        housing_length: Length of housing in Z direction (usually cross timber height)
+        x_position: X position of housing center
+        shoulder_angle: Angle of the shoulder in degrees (+ = deep at min X, - = deep at max X)
+    """
+    x_min = x_position - housing_width / 2
+    x_max = x_position + housing_width / 2
+    
+    # Triangle profile in XY plane - one side flush, other side at depth
+    if shoulder_angle >= 0:
+        # Deep at min X, flush at max X - triangle
+        profile_points = [
+            (x_min, 0),              # Front left
+            (x_max, 0),              # Front right (also back right - flush)
+            (x_min, housing_depth),  # Back left (deep)
+        ]
+    else:
+        # Flush at min X, deep at max X - triangle
+        profile_points = [
+            (x_min, 0),              # Front left (also back left - flush)
+            (x_max, 0),              # Front right
+            (x_max, housing_depth),  # Back right (deep)
+        ]
+    
+    # Create profile and extrude in Z direction
+    z_min = (timber.height - housing_length) / 2
+    wire = Polyline(profile_points, close=True)
+    face = make_face(wire)
+    face = face.move(Location((0, 0, z_min)))
+    
+    wedge = extrude(face, amount=housing_length)
+    return Part(wedge.wrapped)
+
+
+def angled_tenon_cut(
+    timber: Timber,
+    tenon_width: float,
+    tenon_height: float,
+    tenon_length: float,
+    housing_depth: float,
+    shoulder_angle: float,
+) -> Part:
+    """Create a cut to form a tenon with an angled shoulder.
+    
+    Removes material from the end of the timber, leaving only the tenon projecting.
+    The shoulder (surface around the tenon) is angled - one side is at the tenon
+    base, the other side is cut back by housing_depth.
+    
+    Note: tenon_width is in timber's Z direction, tenon_height is in timber's Y direction
+    (rotated 90° from regular tenon to match housing orientation).
+    
+    Args:
+        timber: The timber to cut
+        tenon_width: Width of the tenon (Z direction - across timber height)
+        tenon_height: Height of the tenon (Y direction - across timber width)
+        tenon_length: Length of tenon projecting from the flush side of shoulder
+        housing_depth: Depth of the angled shoulder at the deep side
+        shoulder_angle: Angle of the shoulder in degrees (+ = deep at Y=0)
+    """
+    x_end = timber.length
+    x_tenon_start = x_end - tenon_length  # Flush side of shoulder (tenon base)
+    x_deep = x_tenon_start - housing_depth  # Deep side of shoulder
+    
+    # Tenon dimensions are swapped: width->Z, height->Y
+    # Center tenon on timber cross-section
+    tenon_y = (timber.width - tenon_height) / 2
+    tenon_z = (timber.height - tenon_width) / 2
+    
+    # Full end block from deep side to timber end (covers both shoulder and tenon area)
+    full_cut = create_cutting_box(
+        length=tenon_length + housing_depth,
+        width=timber.width,
+        height=timber.height,
+        position=(x_deep, 0, 0),
+        align=(Align.MIN, Align.MIN, Align.MIN),
+    )
+    
+    # Tenon shape - the part we keep, extends full length of cut
+    tenon = create_cutting_box(
+        length=tenon_length + housing_depth,
+        width=tenon_height,  # Y direction
+        height=tenon_width,  # Z direction
+        position=(x_deep, tenon_y, tenon_z),
+        align=(Align.MIN, Align.MIN, Align.MIN),
+    )
+    
+    # Triangle to keep (not cut) - connects the shoulder area to the timber body
+    # The triangle goes from x_deep (where it meets timber body) to x_tenon_start
+    if shoulder_angle >= 0:
+        # Deep at Y=0, flush at Y=timber.width
+        # Keep triangle: the part that connects to timber body at x_deep
+        profile_points = [
+            (x_deep, 0),                   # At deep X, Y=0 (connects to body)
+            (x_deep, timber.width),        # At deep X, full Y (connects to body)
+            (x_tenon_start, timber.width), # At flush X, full Y (the angled edge)
+        ]
+    else:
+        # Flush at Y=0, deep at Y=timber.width
+        profile_points = [
+            (x_deep, 0),                   # At deep X, Y=0 (connects to body)
+            (x_tenon_start, 0),            # At flush X, Y=0 (the angled edge)
+            (x_deep, timber.width),        # At deep X, full Y (connects to body)
+        ]
+    
+    wire = Polyline(profile_points, close=True)
+    face = make_face(wire)
+    keep_triangle = extrude(face, amount=timber.height)
+    keep_triangle = Part(keep_triangle.wrapped)
+    
+    # Build the cut shape:
+    # 1. Start with full block
+    # 2. Subtract tenon (creates shape around tenon)
+    # 3. Subtract keep_triangle (removes the part we don't want to cut)
+    around_tenon = full_cut - tenon
+    final_cut = around_tenon - keep_triangle
+    
+    return final_cut
