@@ -553,7 +553,6 @@ for node in fixed_nodes_right:
     ccx_lines.append(f"{node}, 1, 3, 0.0")
 
 # Single static step with friction and stabilization
-# Use larger initial increment for speed, moderate convergence for accuracy
 ccx_lines.extend([
     "",
     "** ============================================================",
@@ -565,7 +564,7 @@ ccx_lines.extend([
     "",
     "** Contact convergence controls",
     "*CONTROLS, PARAMETERS=CONTACT",
-    "0.005, 0.15, 75, 150",  # Moderate tolerances",
+    "0.005, 0.15, 75, 150",
     "",
     "** Full load at beam midspan",
     "*CLOAD",
@@ -670,8 +669,8 @@ if results and "displacements" in results:
                     elements.append(parts[1:])  # Just the nodes
     
     # Scale factor for visualization - make deformation visible but not absurd
-    # With ~5mm deflection on 5000mm beam, 50x scale shows it clearly
-    scale_factor = 50.0  # Reasonable exaggeration (5mm -> 250mm visual)
+    # With ~5mm deflection on 5000mm beam, 20x scale shows it clearly
+    scale_factor = 20.0  # Moderate exaggeration (5mm -> 100mm visual)
     
     # Calculate displacement magnitudes
     disp_mag = {}
