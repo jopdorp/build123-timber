@@ -29,7 +29,7 @@ left_post, right_post, beam_positioned, _ = build_complete_bent(
     post_top_extension=300,
 )
 
-margin_gap = 1.0  # mm gap at contact surfaces - needs to be large enough to clear mortise depth
+margin_gap = 0.5  # mm gap at contact surfaces - needs to be large enough to clear mortise depth
 # Scale beam down slightly to create contact gap
 beam_with_gap = expand_shape_by_margin(beam_positioned, -margin_gap)
 
@@ -59,10 +59,19 @@ left_post_bbox = left_post.bounding_box()
 right_post_bbox = right_post.bounding_box()
 beam_bbox = beam_with_gap.bounding_box()
 
-mesh_size = 40.0
+mesh_size = 50.0  # Base mesh size (mm)
+mesh_size_fine = 20.0  # Finer mesh at contact regions (mm)
 
-def mesh_part(step_file: str, part_name: str, mesh_size: float):
-    """Mesh a single part and return nodes, elements, and surface info."""
+def mesh_part(step_file: str, part_name: str, mesh_size: float, refinement_boxes: list = None):
+    """Mesh a single part and return nodes, elements, and surface info.
+    
+    Args:
+        step_file: Path to STEP file
+        part_name: Name for the mesh model
+        mesh_size: Base mesh size
+        refinement_boxes: List of (min_coords, max_coords, fine_size) tuples for local refinement
+                         Each box is ((xmin, ymin, zmin), (xmax, ymax, zmax), fine_mesh_size)
+    """
     gmsh.initialize()
     gmsh.option.setNumber("General.Terminal", 0)
     gmsh.model.add(part_name)
@@ -71,7 +80,33 @@ def mesh_part(step_file: str, part_name: str, mesh_size: float):
     gmsh.model.occ.synchronize()
     
     gmsh.option.setNumber("Mesh.CharacteristicLengthMax", mesh_size)
-    gmsh.option.setNumber("Mesh.CharacteristicLengthMin", mesh_size * 0.5)
+    gmsh.option.setNumber("Mesh.CharacteristicLengthMin", mesh_size * 0.3)
+    
+    # Add refinement fields for contact regions
+    if refinement_boxes:
+        fields = []
+        for i, (min_c, max_c, fine_size) in enumerate(refinement_boxes):
+            # Create a box field for refinement
+            box_field = gmsh.model.mesh.field.add("Box")
+            gmsh.model.mesh.field.setNumber(box_field, "VIn", fine_size)
+            gmsh.model.mesh.field.setNumber(box_field, "VOut", mesh_size)
+            gmsh.model.mesh.field.setNumber(box_field, "XMin", min_c[0])
+            gmsh.model.mesh.field.setNumber(box_field, "XMax", max_c[0])
+            gmsh.model.mesh.field.setNumber(box_field, "YMin", min_c[1])
+            gmsh.model.mesh.field.setNumber(box_field, "YMax", max_c[1])
+            gmsh.model.mesh.field.setNumber(box_field, "ZMin", min_c[2])
+            gmsh.model.mesh.field.setNumber(box_field, "ZMax", max_c[2])
+            gmsh.model.mesh.field.setNumber(box_field, "Thickness", mesh_size)  # Transition zone
+            fields.append(box_field)
+        
+        # Combine all box fields with Min
+        if len(fields) > 1:
+            min_field = gmsh.model.mesh.field.add("Min")
+            gmsh.model.mesh.field.setNumbers(min_field, "FieldsList", fields)
+            gmsh.model.mesh.field.setAsBackgroundMesh(min_field)
+        elif len(fields) == 1:
+            gmsh.model.mesh.field.setAsBackgroundMesh(fields[0])
+    
     gmsh.model.mesh.generate(3)
     
     # Get nodes
@@ -111,14 +146,105 @@ def mesh_part(step_file: str, part_name: str, mesh_size: float):
     
     return nodes, elements, surface_elements
 
-# Mesh all three parts
+
+def get_contact_bbox(contact_faces, elements_for_contact, nodes):
+    """Get bounding box of contact face nodes."""
+    # Collect all node IDs from contact faces
+    contact_node_ids = set()
+    elem_dict = {eid: enodes for eid, enodes in elements_for_contact}
+    face_node_indices = [(0, 1, 2), (0, 1, 3), (1, 2, 3), (0, 2, 3)]
+    
+    for elem_id, face_num in contact_faces:
+        elem_nodes = elem_dict[elem_id]
+        i, j, k = face_node_indices[face_num - 1]
+        contact_node_ids.add(elem_nodes[i])
+        contact_node_ids.add(elem_nodes[j])
+        contact_node_ids.add(elem_nodes[k])
+    
+    if not contact_node_ids:
+        return None
+    
+    # Get coordinates
+    xs = [nodes[nid][0] for nid in contact_node_ids]
+    ys = [nodes[nid][1] for nid in contact_node_ids]
+    zs = [nodes[nid][2] for nid in contact_node_ids]
+    
+    return ((min(xs), min(ys), min(zs)), (max(xs), max(ys), max(zs)))
+
+
+# Mesh all three parts - first pass with coarse mesh to find contact regions
 left_post_step = str(output_dir / "left_post.step")
 right_post_step = str(output_dir / "right_post.step")
 beam_step = str(output_dir / "beam.step")
 
-left_nodes, left_elements, left_surfaces = mesh_part(left_post_step, "left_post", mesh_size)
-right_nodes, right_elements, right_surfaces = mesh_part(right_post_step, "right_post", mesh_size)
-beam_nodes, beam_elements, beam_surfaces = mesh_part(beam_step, "beam", mesh_size)
+print("Pass 1: Coarse mesh to identify contact regions...")
+left_nodes_coarse, left_elements_coarse, _ = mesh_part(left_post_step, "left_post", mesh_size)
+right_nodes_coarse, right_elements_coarse, _ = mesh_part(right_post_step, "right_post", mesh_size)
+beam_nodes_coarse, beam_elements_coarse, _ = mesh_part(beam_step, "beam", mesh_size)
+
+# Find contact regions on coarse mesh
+beam_elements_coarse_for_contact = [(i + 1, elem) for i, elem in enumerate(beam_elements_coarse)]
+left_post_elements_coarse_for_contact = [(i + 1, elem) for i, elem in enumerate(left_elements_coarse)]
+right_post_elements_coarse_for_contact = [(i + 1, elem) for i, elem in enumerate(right_elements_coarse)]
+
+left_beam_faces_coarse, left_post_faces_coarse = find_mesh_contact_faces(
+    beam_elements_coarse_for_contact, beam_nodes_coarse,
+    left_post_elements_coarse_for_contact, left_nodes_coarse,
+    margin=mesh_size + margin_gap
+)
+right_beam_faces_coarse, right_post_faces_coarse = find_mesh_contact_faces(
+    beam_elements_coarse_for_contact, beam_nodes_coarse,
+    right_post_elements_coarse_for_contact, right_nodes_coarse,
+    margin=mesh_size + margin_gap
+)
+
+# Get bounding boxes of contact regions (with some margin for refinement)
+refinement_margin = 10.0  # Small margin around contact region (mm)
+left_beam_bbox = get_contact_bbox(left_beam_faces_coarse, beam_elements_coarse_for_contact, beam_nodes_coarse)
+right_beam_bbox = get_contact_bbox(right_beam_faces_coarse, beam_elements_coarse_for_contact, beam_nodes_coarse)
+left_post_bbox_contact = get_contact_bbox(left_post_faces_coarse, left_post_elements_coarse_for_contact, left_nodes_coarse)
+right_post_bbox_contact = get_contact_bbox(right_post_faces_coarse, right_post_elements_coarse_for_contact, right_nodes_coarse)
+
+# Build refinement boxes for each part
+def expand_bbox(bbox, margin):
+    if bbox is None:
+        return None
+    return (
+        (bbox[0][0] - margin, bbox[0][1] - margin, bbox[0][2] - margin),
+        (bbox[1][0] + margin, bbox[1][1] + margin, bbox[1][2] + margin)
+    )
+
+beam_refinement_boxes = []
+if left_beam_bbox:
+    expanded = expand_bbox(left_beam_bbox, refinement_margin)
+    beam_refinement_boxes.append((expanded[0], expanded[1], mesh_size_fine))
+if right_beam_bbox:
+    expanded = expand_bbox(right_beam_bbox, refinement_margin)
+    beam_refinement_boxes.append((expanded[0], expanded[1], mesh_size_fine))
+
+left_post_refinement_boxes = []
+if left_post_bbox_contact:
+    expanded = expand_bbox(left_post_bbox_contact, refinement_margin)
+    left_post_refinement_boxes.append((expanded[0], expanded[1], mesh_size_fine))
+
+right_post_refinement_boxes = []
+if right_post_bbox_contact:
+    expanded = expand_bbox(right_post_bbox_contact, refinement_margin)
+    right_post_refinement_boxes.append((expanded[0], expanded[1], mesh_size_fine))
+
+print(f"  Found {len(beam_refinement_boxes)} beam contact regions")
+print(f"  Left post contact region: {left_post_bbox_contact}")
+print(f"  Right post contact region: {right_post_bbox_contact}")
+
+# Pass 2: Re-mesh with refinement at contact regions
+print("\nPass 2: Refined mesh at contact regions...")
+left_nodes, left_elements, left_surfaces = mesh_part(left_post_step, "left_post", mesh_size, left_post_refinement_boxes)
+right_nodes, right_elements, right_surfaces = mesh_part(right_post_step, "right_post", mesh_size, right_post_refinement_boxes)
+beam_nodes, beam_elements, beam_surfaces = mesh_part(beam_step, "beam", mesh_size, beam_refinement_boxes)
+
+print(f"  Left post: {len(left_nodes)} nodes, {len(left_elements)} elements")
+print(f"  Right post: {len(right_nodes)} nodes, {len(right_elements)} elements")
+print(f"  Beam: {len(beam_nodes)} nodes, {len(beam_elements)} elements")
 
 # Renumber nodes and elements to combine into single mesh
 left_node_offset = 0
@@ -209,16 +335,17 @@ left_post_elements_for_contact = [(i + 1, elem) for i, elem in enumerate(left_el
 right_post_elements_for_contact = [(i + 1, elem) for i, elem in enumerate(right_elements)]
 
 # Find contacts using original nodes (no offsets)
+# Use mesh_size_fine for margin since we have refined mesh at contact regions
 left_beam_faces_orig, left_post_faces_orig = find_mesh_contact_faces(
     beam_elements_for_contact, beam_nodes,
     left_post_elements_for_contact, left_nodes,
-    margin=mesh_size + margin_gap
+    margin=mesh_size_fine + margin_gap
 )
 
 right_beam_faces_orig, right_post_faces_orig = find_mesh_contact_faces(
     beam_elements_for_contact, beam_nodes,
     right_post_elements_for_contact, right_nodes,
-    margin=mesh_size + margin_gap
+    margin=mesh_size_fine + margin_gap
 )
 
 # Map element IDs to combined mesh IDs
@@ -358,25 +485,21 @@ with open(mesh_file, 'w') as f:
 
 print(f"\nMesh file: {mesh_file}")
 
-# Write CalculiX input with MULTI-STEP approach:
-# Step 1: Frictionless contact to establish contact state
-# Steps 2-N: Add friction and incrementally increase load
+# Write CalculiX input - single static step with friction from start
+# CalculiX doesn't support changing contact between steps, so we use
+# friction with stabilization from the beginning
 
 load_magnitude = 10000.0  # 10 kN = ~1 tonne total
 load_per_node = load_magnitude / len(load_nodes) if load_nodes else 0
 
-# Friction coefficient for wood-on-wood (target value)
-friction_coeff = 0.2  # Moderate friction for realistic wood contact
-stick_slope = 2000.0  # Standard penalty stiffness
-
-# Multi-step loading with more gradual increments at high load
-num_friction_steps = 15  # More steps for finer load increments
-use_surface_to_surface = True  # Surface-to-surface contact for smoother friction
+# Friction parameters
+friction_coeff = 0.2  # Moderate friction for wood contact
+stick_slope = 2000.0  # Tangential penalty stiffness  
+stabilize = 0.01  # Friction stabilization (damping for convergence)
 
 ccx_lines = [
-    "** CalculiX Complete Bent Frame Analysis - MULTI-STEP FRICTION",
-    "** Step 1: Frictionless contact with minimal load (establish contact)",
-    "** Steps 2+: Friction enabled, incrementally increase load",
+    "** CalculiX Complete Bent Frame Analysis",
+    "** Single static step with friction contact and stabilization",
     "**",
     "",
     f"*INCLUDE, INPUT=mesh.inp",
@@ -392,26 +515,20 @@ ccx_lines = [
     "",
     "*SOLID SECTION, ELSET=TIMBER, MATERIAL=" + material.name,
     "",
-    "** Surface interaction - FRICTIONLESS for step 1",
-    "*SURFACE INTERACTION, NAME=FRICTIONLESS_CONTACT",
-    "*SURFACE BEHAVIOR, PRESSURE-OVERCLOSURE=LINEAR",
-    f"1e3, 0.0, {margin_gap}",  # slope K, sigma_inf=0, c0 = margin_gap
-    "",
-    "** Surface interaction - WITH FRICTION for steps 2+",
-    "*SURFACE INTERACTION, NAME=FRICTION_CONTACT",
+    "** Frictional surface interaction with stabilization",
+    "*SURFACE INTERACTION, NAME=WOOD_CONTACT",
     "*SURFACE BEHAVIOR, PRESSURE-OVERCLOSURE=LINEAR",
     f"1e3, 0.0, {margin_gap}",
-    "*FRICTION",
+    f"*FRICTION, STABILIZE={stabilize}",
     f"{friction_coeff}, {stick_slope}",
     "",
 ]
 
-# Contact pairs for joints - use frictionless initially
-contact_type = "SURFACE TO SURFACE" if use_surface_to_surface else "NODE TO SURFACE"
+# Contact pairs for joints
 if left_beam_faces and left_post_faces:
     ccx_lines.extend([
         "** Left joint contact pair",
-        f"*CONTACT PAIR, INTERACTION=FRICTIONLESS_CONTACT, TYPE={contact_type}, ADJUST={margin_gap + 1}",
+        f"*CONTACT PAIR, INTERACTION=WOOD_CONTACT, TYPE=SURFACE TO SURFACE, ADJUST={margin_gap + 1}",
         "LEFT_BEAM_SURF, LEFT_POST_SURF",
         "",
     ])
@@ -419,7 +536,7 @@ if left_beam_faces and left_post_faces:
 if right_beam_faces and right_post_faces:
     ccx_lines.extend([
         "** Right joint contact pair", 
-        f"*CONTACT PAIR, INTERACTION=FRICTIONLESS_CONTACT, TYPE={contact_type}, ADJUST={margin_gap + 1}",
+        f"*CONTACT PAIR, INTERACTION=WOOD_CONTACT, TYPE=SURFACE TO SURFACE, ADJUST={margin_gap + 1}",
         "RIGHT_BEAM_SURF, RIGHT_POST_SURF",
         "",
     ])
@@ -435,29 +552,33 @@ for node in fixed_nodes_left:
 for node in fixed_nodes_right:
     ccx_lines.append(f"{node}, 1, 3, 0.0")
 
-# Step 1: Frictionless contact with small load to establish contact
-initial_load_fraction = 0.05  # 5% of total load
+# Single static step with friction and stabilization
+# Use larger initial increment for speed, moderate convergence for accuracy
 ccx_lines.extend([
     "",
     "** ============================================================",
-    "** STEP 1: Establish contact (frictionless, small load)",
+    "** Single static step with friction contact",
     "** ============================================================",
     "*STEP, NLGEOM, INC=100",
     "*STATIC",
-    "0.1, 1.0, 1e-8, 0.5",
+    "0.2, 1.0, 1e-5, 0.4",  # Larger initial step, smaller max
     "",
-    "** Small initial load to press surfaces into contact",
+    "** Contact convergence controls",
+    "*CONTROLS, PARAMETERS=CONTACT",
+    "0.005, 0.15, 75, 150",  # Moderate tolerances",
+    "",
+    "** Full load at beam midspan",
     "*CLOAD",
 ])
 
 for node in load_nodes:
-    ccx_lines.append(f"{node}, 3, {-load_per_node * initial_load_fraction:.6f}")
+    ccx_lines.append(f"{node}, 3, {-load_per_node:.6f}")
 
 ccx_lines.extend([
     "",
     "*NODE FILE",
     "U, RF",
-    "*EL FILE", 
+    "*EL FILE",
     "S, E",
     "*CONTACT FILE",
     "CDIS, CSTR",
@@ -465,66 +586,15 @@ ccx_lines.extend([
     "*END STEP",
 ])
 
-# Steps 2+: Switch to friction and incrementally increase load
-# Use smaller steps and CONTROLS for better convergence
-load_fractions = np.linspace(initial_load_fraction, 1.0, num_friction_steps + 1)[1:]  # Skip first (already done)
-
-for step_num, load_frac in enumerate(load_fractions, start=2):
-    prev_frac = load_fractions[step_num - 3] if step_num > 2 else initial_load_fraction
-    
-    ccx_lines.extend([
-        "",
-        f"** ============================================================",
-        f"** STEP {step_num}: Friction enabled, load = {load_frac*100:.0f}%",
-        f"** ============================================================",
-        "*STEP, NLGEOM, INC=500",
-        "*STATIC",
-        "0.02, 1.0, 1e-10, 0.1",  # Very small increments for friction
-        "",
-        "** Line search and convergence controls for friction",
-        "*CONTROLS, PARAMETERS=LINE SEARCH",
-        "6, 2.0, 0.5, 0.85, 0.0",
-        "*CONTROLS, PARAMETERS=FIELD",
-        "0.01, 4.0, 0.01, 1e5",  # Tighter convergence
-        "",
-        "** Change to friction contact",
-        "*CHANGE SURFACE BEHAVIOR, INTERACTION=FRICTIONLESS_CONTACT",
-        "*SURFACE BEHAVIOR, PRESSURE-OVERCLOSURE=LINEAR",
-        f"1e3, 0.0, {margin_gap}",
-        "*FRICTION",
-        f"{friction_coeff}, {stick_slope}",
-        "",
-        "** Increase load",
-        "*CLOAD",
-    ])
-    
-    for node in load_nodes:
-        ccx_lines.append(f"{node}, 3, {-load_per_node * load_frac:.6f}")
-    
-    ccx_lines.extend([
-        "",
-        "*NODE FILE",
-        "U, RF",
-        "*EL FILE",
-        "S, E", 
-        "*CONTACT FILE",
-        "CDIS, CSTR",
-        "",
-        "*END STEP",
-    ])
-
 ccx_file = str(output_dir / "analysis.inp")
 with open(ccx_file, 'w') as f:
     f.write('\n'.join(ccx_lines))
 
 print(f"\nCalculiX input: {ccx_file}")
 print(f"Load: {load_magnitude} N at beam midspan")
-print(f"Joint model: Multi-step friction with S2S contact")
-print(f"  Step 1: Frictionless, {initial_load_fraction*100:.0f}% load (establish contact)")
-print(f"  Steps 2-{num_friction_steps+1}: Friction μ={friction_coeff}, STATIC")
-print(f"  Contact type: {contact_type}")
-print(f"Contact surfaces: {len(left_beam_faces) + len(right_beam_faces)} beam faces, "
-      f"{len(left_post_faces) + len(right_post_faces)} post faces")
+print(f"Joint model: Static with friction μ={friction_coeff}")
+print(f"  Friction stabilization: {stabilize}")
+print(f"  Contact surfaces: {len(left_beam_faces) + len(right_beam_faces)} beam faces, {len(left_post_faces) + len(right_post_faces)} post faces")
 
 # Run CalculiX with full output
 print("\nRunning FEA solver...")
@@ -599,9 +669,9 @@ if results and "displacements" in results:
                 if len(parts) == 5:  # elem_id, n1, n2, n3, n4
                     elements.append(parts[1:])  # Just the nodes
     
-    # Scale factor for visualization - make deformation clearly visible
-    # Max deflection is ~0.5mm, need large scale to see on 5000mm beam
-    scale_factor = 500.0  # Exaggerated for visibility
+    # Scale factor for visualization - make deformation visible but not absurd
+    # With ~5mm deflection on 5000mm beam, 50x scale shows it clearly
+    scale_factor = 50.0  # Reasonable exaggeration (5mm -> 250mm visual)
     
     # Calculate displacement magnitudes
     disp_mag = {}
@@ -690,10 +760,10 @@ print(f"  Joints: Shouldered mortise-and-tenon with friction contact")
 print(f"  Material: {material.name}")
 print(f"  Load: {load_magnitude} N at beam midspan")
 print(f"  Boundary: Posts fixed at foundation (Z=0)")
-print(f"\nJoint Model (Multi-Step Friction):")
-print(f"  - Step 1: Frictionless contact, {initial_load_fraction*100:.0f}% load")
-print(f"  - Steps 2-{num_friction_steps+1}: Friction μ={friction_coeff}, incremental load")
-print(f"  - Contact surfaces: beam tenon faces <-> post mortise faces")
+print(f"\nJoint Model (Single Static Step):")
+print(f"  - Friction coefficient μ={friction_coeff}")
+print(f"  - Friction stabilization: {stabilize}")
+print(f"  - Contact: beam tenon faces <-> post mortise faces")
 
 if results:
     print(f"\nResults:")
