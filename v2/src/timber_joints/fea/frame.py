@@ -146,6 +146,7 @@ class TimberFrame:
         self,
         load: float = 10000.0,
         load_location: Optional[Callable[[float, float, float], bool]] = None,
+        additional_loads: Optional[List[LoadBC]] = None,
         mesh_size: float = 50.0,
         mesh_size_fine: float = 20.0,
         output_dir: Path = None,
@@ -163,6 +164,7 @@ class TimberFrame:
             load: Total load to apply (N), negative for downward
             load_location: Optional function (x,y,z) -> bool for load nodes.
                           Defaults to beam midspan top surface.
+            additional_loads: Optional list of additional LoadBC objects
             mesh_size: Base mesh element size (mm)
             mesh_size_fine: Fine mesh at contacts (mm)
             output_dir: Directory for output files
@@ -231,6 +233,10 @@ class TimberFrame:
             load_location_fn = wrapped_load
         
         load_bcs = [LoadBC("main_load", load_location_fn, dof=3, total_load=load)]
+        
+        # Add any additional loads
+        if additional_loads:
+            load_bcs.extend(additional_loads)
         
         # Configure and run
         config = AssemblyConfig(

@@ -15,7 +15,7 @@ from timber_joints.alignment import build_complete_bent, create_receiving_cut
 from timber_joints.beam import Beam
 from timber_joints.tenon import Tenon
 from timber_joints.utils import create_vertical_cut
-from timber_joints.fea import TimberFrame, show_fea_results
+from timber_joints.fea import TimberFrame, show_fea_results, LoadBC
 
 reset_show()
 
@@ -150,8 +150,7 @@ print(f"Total parts: {len(all_parts)}")
 
 
 # %%
-# FEA Analysis (commented out for now - first check geometry)
-"""
+# FEA Analysis
 frame = TimberFrame()
 
 # Add bent members
@@ -178,19 +177,55 @@ print(f"  - Girts: {GIRT_LENGTH}mm long, {GIRT_SECTION}mm section")
 print(f"  - Total members: {len(frame.members)}")
 print()
 
+# Define additional loads on girts
+# Right girt: 1/4 along Y (Y=1537.5mm), 0.5 tonne downward = 500kg * 9.81 = 4905 N
+right_girt_bbox = right_girt.bounding_box()
+right_girt_y_quarter = right_girt_bbox.min.Y + (right_girt_bbox.max.Y - right_girt_bbox.min.Y) * 0.25
+right_girt_top_z = right_girt_bbox.max.Z
+right_girt_center_x = (right_girt_bbox.min.X + right_girt_bbox.max.X) / 2
+
+def right_girt_load_filter(nid, x, y, z, part, mesh):
+    return (part == "right_girt" and 
+            abs(y - right_girt_y_quarter) < 70.0 and 
+            abs(z - right_girt_top_z) < 35.0)
+
+# Left girt: 3/4 along Y (Y=4612.5mm), 100kg sideways (positive X) = 100kg * 9.81 = 981 N
+left_girt_bbox = left_girt.bounding_box()
+left_girt_y_threequarter = left_girt_bbox.min.Y + (left_girt_bbox.max.Y - left_girt_bbox.min.Y) * 0.75
+left_girt_center_z = (left_girt_bbox.min.Z + left_girt_bbox.max.Z) / 2
+left_girt_right_x = left_girt_bbox.max.X  # Apply on right side of left girt
+
+def left_girt_load_filter(nid, x, y, z, part, mesh):
+    return (part == "left_girt" and 
+            abs(y - left_girt_y_threequarter) < 70.0 and 
+            abs(x - left_girt_right_x) < 35.0)
+
+additional_loads = [
+    LoadBC("right_girt_load", right_girt_load_filter, dof=3, total_load=-4905.0),  # 0.5 tonne down
+    LoadBC("left_girt_load", left_girt_load_filter, dof=1, total_load=981.0),      # 100kg sideways +X
+]
+
+print(f"Additional loads:")
+print(f"  - Right girt at Y={right_girt_y_quarter:.1f}mm: 500 kg downward")
+print(f"  - Left girt at Y={left_girt_y_threequarter:.1f}mm: 100 kg sideways (+X)")
+print()
+
 result = frame.analyze(
     load=-10000.0,  # 10 kN downward (applied to center beam)
+    additional_loads=additional_loads,
     output_dir=output_dir,
+    mesh_size=70.0,        # Coarser default mesh
+    mesh_size_fine=30.0,   # Finer mesh at joints
 )
 
-print("\\n" + "=" * 60)
+print("\n" + "=" * 60)
 print("ANALYSIS SUMMARY")
 print("=" * 60)
 print(f"Success: {result.success}")
 print(f"Mesh: {result.num_nodes} nodes, {result.num_elements} elements")
 
 if result.success:
-    print(f"\\nDeflection Results:")
+    print(f"\nDeflection Results:")
     print(f"  Max total: {result.fea_results.max_displacement:.4f} mm")
     print(f"  Max Z: {result.fea_results.max_uz:.4f} mm")
     
@@ -224,4 +259,3 @@ if result.success:
         deformed_color="red",
         original_alpha=0.3,
     )
-"""
