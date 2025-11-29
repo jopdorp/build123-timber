@@ -243,3 +243,118 @@ def position_for_blind_mortise(
         # Move beam (default)
         beam_for_cut = beam.move(Location((x_offset, 0, -post_top_extension)))
         return beam_for_cut, post
+
+
+def build_complete_bent(
+    post_height: float = 3000,
+    post_section: float = 150,
+    beam_length: float = 5000,
+    beam_section: float = None,
+    tenon_length: float = 60,
+    shoulder_depth: float = 20,
+    housing_depth: float = 20,
+    post_top_extension: float = 300,
+) -> tuple[Part, Part, Part, "Beam"]:
+    """Build a complete bent with shouldered tenon joints.
+    
+    Creates two posts with a beam connected by shouldered tenon joints.
+    The beam has tenons on both ends, and mortises are cut in the posts.
+    
+    Args:
+        post_height: Height of the posts (length before rotation)
+        post_section: Cross-section size of posts (width = height)
+        beam_length: Length of the connecting beam
+        beam_section: Cross-section size of beam (defaults to post_section)
+        tenon_length: Length of tenon projections
+        shoulder_depth: Depth of angled shoulder on tenon
+        housing_depth: Material left at far side of mortise
+        post_top_extension: Extra mortise height above beam for housing
+        
+    Returns:
+        (left_post_with_mortise, right_post_with_mortise, positioned_beam, beam)
+        - left_post_with_mortise: Left post Part with mortise cut
+        - right_post_with_mortise: Right post Part with mortise cut  
+        - positioned_beam: Beam Part in final position (with tenons on both ends)
+        - beam: Original Beam object (for FEA mesh generation)
+    """
+    # Import here to avoid circular imports
+    from timber_joints.beam import Beam
+    from timber_joints.shouldered_tenon import ShoulderedTenon
+    
+    beam_section = beam_section or post_section
+    
+    # Create posts and beam
+    post_left = Beam(length=post_height, width=post_section, height=post_section)
+    post_right = Beam(length=post_height, width=post_section, height=post_section)
+    beam = Beam(length=beam_length, width=beam_section, height=beam_section)
+    
+    # Tenon dimensions: 1/3 width, 2/3 height
+    tenon_width = beam.width / 3
+    tenon_height = beam.height * 2 / 3
+    drop_depth = beam.height
+    
+    # Create beam with tenons on BOTH ends
+    beam_with_start = ShoulderedTenon(
+        beam=beam,
+        tenon_width=tenon_width,
+        tenon_height=tenon_height,
+        tenon_length=tenon_length,
+        shoulder_depth=shoulder_depth,
+        at_start=True,
+    ).shape
+
+    beam_with_both_tenons = ShoulderedTenon(
+        beam=beam_with_start,
+        tenon_width=tenon_width,
+        tenon_height=tenon_height,
+        tenon_length=tenon_length,
+        shoulder_depth=shoulder_depth,
+        at_start=False,
+    ).shape
+    
+    # Make posts vertical
+    vertical_post_left = make_post_vertical(post_left.shape)
+    vertical_post_right = make_post_vertical(post_right.shape)
+    
+    # Step 1: Align beam to LEFT post (beam start at post)
+    positioned_beam, _, _ = align_beam_in_post(
+        beam=beam_with_both_tenons,
+        post=vertical_post_left,
+        drop_depth=drop_depth,
+        at_start=True,
+        move_post=False,
+    )
+    
+    # Step 2: Create mortise in left post
+    beam_for_left_cut, _ = position_for_blind_mortise(
+        beam=positioned_beam,
+        post=vertical_post_left,
+        tenon_length=tenon_length,
+        housing_depth=housing_depth,
+        post_top_extension=post_top_extension,
+        at_start=True,
+    )
+    left_post_with_mortise = create_receiving_cut(beam_for_left_cut, vertical_post_left)
+    
+    # Step 3: Align right post to beam end (move post to beam)
+    _, positioned_post_right, _ = align_beam_in_post(
+        beam=positioned_beam,
+        post=vertical_post_right,
+        drop_depth=drop_depth,
+        at_start=False,
+        move_post=True,
+    )
+    
+    # Step 4: Create mortise in right post
+    _, positioned_post_right_cut = position_for_blind_mortise(
+        beam=positioned_beam,
+        post=positioned_post_right,
+        tenon_length=tenon_length,
+        housing_depth=housing_depth,
+        post_top_extension=post_top_extension,
+        at_start=False,
+        move_post=True,
+    )
+    right_post_with_mortise = create_receiving_cut(positioned_beam, positioned_post_right_cut)
+    
+    return left_post_with_mortise, right_post_with_mortise, positioned_beam, beam

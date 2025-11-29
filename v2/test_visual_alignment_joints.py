@@ -533,96 +533,34 @@ show_object(beam_with_both_tenons.move(Location((-1200, 0, 1200))), name="Beam w
 
 # %%
 # 7. Complete Bent - Two posts with beam having shouldered tenons on both ends
-# This demonstrates the full assembly with posts at both ends
+# This demonstrates the full assembly with posts at both ends using the utility function
 
 from ocp_vscode import show_object
 from build123d import Location
-from timber_joints.beam import Beam
-from timber_joints.shouldered_tenon import ShoulderedTenon
-from timber_joints.alignment import align_beam_in_post, make_post_vertical, create_receiving_cut, position_for_blind_mortise
+from timber_joints.alignment import build_complete_bent
 
-# Dimensions
+# Build the complete bent using the utility function
 post_height = 3000
 post_section = 150
 beam_length = 5000
-
-# Create posts and beam
-post_left = Beam(length=post_height, width=post_section, height=post_section)
-post_right = Beam(length=post_height, width=post_section, height=post_section)
-beam = Beam(length=beam_length, width=post_section, height=post_section)
-
-# Tenon dimensions
-tenon_width = beam.width / 3
-tenon_height = beam.height * 2 / 3
 tenon_length = 60
 shoulder_depth = 20
 housing_depth = 20
 post_top_extension = 300
-drop_depth = beam.height
 
-# Create beam with tenons on BOTH ends
-beam_with_start = ShoulderedTenon(
-    beam=beam,
-    tenon_width=tenon_width,
-    tenon_height=tenon_height,
+left_post_with_mortise, right_post_with_mortise, positioned_beam, beam = build_complete_bent(
+    post_height=post_height,
+    post_section=post_section,
+    beam_length=beam_length,
     tenon_length=tenon_length,
     shoulder_depth=shoulder_depth,
-    at_start=True,
-).shape
-
-beam_with_both_tenons = ShoulderedTenon(
-    beam=beam_with_start,
-    tenon_width=tenon_width,
-    tenon_height=tenon_height,
-    tenon_length=tenon_length,
-    shoulder_depth=shoulder_depth,
-    at_start=False,
-).shape
-
-# Make posts vertical
-vertical_post_left = make_post_vertical(post_left.shape)
-vertical_post_right = make_post_vertical(post_right.shape)
-
-# Step 1: Align beam to LEFT post (beam start at post, move beam to post)
-positioned_beam, _, _ = align_beam_in_post(
-    beam=beam_with_both_tenons,
-    post=vertical_post_left,
-    drop_depth=drop_depth,
-    at_start=True,
-    move_post=False,
-)
-
-# Step 2: Create mortise in left post (pass both beam and post)
-beam_for_left_cut, _ = position_for_blind_mortise(
-    beam=positioned_beam,
-    post=vertical_post_left,
-    tenon_length=tenon_length,
     housing_depth=housing_depth,
     post_top_extension=post_top_extension,
-    at_start=True,
-)
-left_post_with_mortise = create_receiving_cut(beam_for_left_cut, vertical_post_left)
-
-# Step 3: Align right post to beam end (move post to beam)
-_, positioned_post_right, _ = align_beam_in_post(
-    beam=positioned_beam,  # Use positioned_beam, not beam_final
-    post=vertical_post_right,
-    drop_depth=drop_depth,
-    at_start=False,
-    move_post=True,
 )
 
-# Step 4: Create mortise in right post (move post for blind cut)
-_, positioned_post_right_cut = position_for_blind_mortise(
-    beam=positioned_beam,
-    post=positioned_post_right,
-    tenon_length=tenon_length,
-    housing_depth=housing_depth,
-    post_top_extension=post_top_extension,
-    at_start=False,
-    move_post=True,
-)
-right_post_with_mortise = create_receiving_cut(positioned_beam, positioned_post_right_cut)
+# Tenon dimensions for display
+tenon_width = beam.width / 3
+tenon_height = beam.height * 2 / 3
 
 print("=== 7. Complete Bent - Two Posts with Beam ===")
 print(f"Post height: {post_height}mm, section: {post_section}mm")

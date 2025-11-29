@@ -13,6 +13,7 @@ from timber_joints.alignment import (
     make_post_vertical,
     create_receiving_cut,
     position_for_blind_mortise,
+    build_complete_bent,
 )
 from timber_joints.utils import get_shape_dimensions
 
@@ -60,6 +61,7 @@ __all__ = [
     "make_post_vertical",
     "create_receiving_cut",
     "position_for_blind_mortise",
+    "build_complete_bent",
     # Frame assembly
     "Role",
     "Element",
