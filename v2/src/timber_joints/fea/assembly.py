@@ -6,8 +6,8 @@ This module provides composable building blocks for FEA analysis:
 - Boundary condition definitions
 - Generic assembly analysis
 
-The bent-frame specific code is kept as a convenience function that
-composes these building blocks.
+The frame.py module provides a higher-level API (TimberFrame) that
+auto-detects contacts and boundary conditions from geometry.
 """
 
 from dataclasses import dataclass, field

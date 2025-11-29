@@ -59,6 +59,12 @@ from .assembly import (
     nodes_in_bbox,
 )
 
+from .frame import (
+    MemberType,
+    FrameMember,
+    TimberFrame,
+)
+
 __all__ = [
     # Meshing
     "RefinementBox",
@@ -100,4 +106,8 @@ __all__ = [
     "analyze_assembly",
     "nodes_at_location",
     "nodes_in_bbox",
+    # High-level Frame API
+    "MemberType",
+    "FrameMember",
+    "TimberFrame",
 ]
