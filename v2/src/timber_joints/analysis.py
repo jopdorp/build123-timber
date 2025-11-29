@@ -2,10 +2,387 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Tuple
 import os
 
+from build123d import Part, Location, Box, Align, Compound
+
 from timber_joints.frame import TimberFrame, Element, Role
+
+
+# =============================================================================
+# Contact Surface Utilities
+# =============================================================================
+
+def get_bbox_solid(bbox) -> Part:
+    """Create a solid box from a bounding box."""
+    size_x = bbox.max.X - bbox.min.X
+    size_y = bbox.max.Y - bbox.min.Y
+    size_z = bbox.max.Z - bbox.min.Z
+    box = Box(size_x, size_y, size_z, align=(Align.MIN, Align.MIN, Align.MIN))
+    return box.move(Location((bbox.min.X, bbox.min.Y, bbox.min.Z)))
+
+
+def scale_shape_in_place(shape: Part, scale_factor: float) -> Part:
+    """Scale a shape from its center (not from origin)."""
+    center = shape.bounding_box().center()
+    centered = shape.move(Location((-center.X, -center.Y, -center.Z)))
+    scaled = centered.scale(scale_factor)
+    return scaled.move(Location((center.X, center.Y, center.Z)))
+
+
+def expand_shape_by_margin(shape: Part, margin: float) -> Part:
+    """
+    Scale a shape to expand its bounding box by a fixed margin on each axis.
+    
+    Unlike uniform scaling, this calculates independent scale factors per axis
+    to achieve the same absolute margin expansion on each side.
+    
+    Args:
+        shape: The shape to expand
+        margin: Fixed amount (mm) to add to each side of each axis
+    
+    Returns:
+        The shape scaled non-uniformly to achieve the margin expansion
+    """
+    from OCP.gp import gp_GTrsf, gp_XYZ
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_GTransform
+    
+    bbox = shape.bounding_box()
+    center = bbox.center()
+    
+    # Calculate size in each dimension
+    size_x = bbox.max.X - bbox.min.X
+    size_y = bbox.max.Y - bbox.min.Y
+    size_z = bbox.max.Z - bbox.min.Z
+    
+    # Calculate scale factor for each axis to add margin to each side
+    scale_x = (size_x + 2 * margin) / size_x if size_x > 0 else 1.0
+    scale_y = (size_y + 2 * margin) / size_y if size_y > 0 else 1.0
+    scale_z = (size_z + 2 * margin) / size_z if size_z > 0 else 1.0
+    
+    # Move shape to origin, apply non-uniform scale, move back
+    centered = shape.move(Location((-center.X, -center.Y, -center.Z)))
+    
+    # Create non-uniform scaling transformation
+    gtrsf = gp_GTrsf()
+    gtrsf.SetValue(1, 1, scale_x)
+    gtrsf.SetValue(2, 2, scale_y)
+    gtrsf.SetValue(3, 3, scale_z)
+    
+    transform = BRepBuilderAPI_GTransform(centered.wrapped, gtrsf, True)
+    scaled = Part(transform.Shape())
+    
+    return scaled.move(Location((center.X, center.Y, center.Z)))
+
+
+def find_contact_surface(target_shape: Part, other_shape: Part, margin: float = 0.1) -> Compound:
+    """
+    Find the contact surface region between two shapes.
+    
+    Returns only the faces from target_shape that are in the contact region,
+    filtering out bbox artifact faces (faces on the bbox boundary planes).
+    
+    Args:
+        target_shape: The shape to extract the contact region from
+        other_shape: The shape whose bounding box defines the contact region
+        margin: Fixed amount (mm) to expand bbox on each side
+    
+    Returns:
+        A Compound containing only the faces from target_shape that are in the
+        contact region (artifact faces from the bbox cut are filtered out)
+    """
+    from OCP.BRep import BRep_Builder
+    from OCP.TopoDS import TopoDS_Compound
+    
+    # Create expanded bbox solid for intersection
+    other_bbox = other_shape.bounding_box()
+    size_x = other_bbox.max.X - other_bbox.min.X + 2 * margin
+    size_y = other_bbox.max.Y - other_bbox.min.Y + 2 * margin
+    size_z = other_bbox.max.Z - other_bbox.min.Z + 2 * margin
+    expanded_bbox_solid = Box(size_x, size_y, size_z, align=(Align.MIN, Align.MIN, Align.MIN))
+    expanded_bbox_solid = expanded_bbox_solid.move(Location((
+        other_bbox.min.X - margin,
+        other_bbox.min.Y - margin,
+        other_bbox.min.Z - margin
+    )))
+    
+    # Get the expanded bbox boundaries for artifact filtering
+    expanded_bbox = expanded_bbox_solid.bounding_box()
+    bbox_planes = [
+        expanded_bbox.min.X, expanded_bbox.max.X,
+        expanded_bbox.min.Y, expanded_bbox.max.Y,
+        expanded_bbox.min.Z, expanded_bbox.max.Z,
+    ]
+    
+    # Boolean intersection
+    intersection = target_shape & expanded_bbox_solid
+    
+    # Filter out faces that lie on any bbox boundary plane
+    # Use a small fixed tolerance for plane detection (independent of margin)
+    plane_tol = 0.1
+    kept_faces = []
+    
+    for face in intersection.faces():
+        center = face.center()
+        
+        # Check if face center is on any bbox boundary plane
+        on_bbox_plane = False
+        for plane_coord in bbox_planes:
+            if (abs(center.X - plane_coord) < plane_tol or
+                abs(center.Y - plane_coord) < plane_tol or
+                abs(center.Z - plane_coord) < plane_tol):
+                on_bbox_plane = True
+                break
+        
+        if not on_bbox_plane:
+            kept_faces.append(face)
+    
+    # Build a compound from kept faces
+    if kept_faces:
+        builder = BRep_Builder()
+        compound = TopoDS_Compound()
+        builder.MakeCompound(compound)
+        for face in kept_faces:
+            builder.Add(compound, face.wrapped)
+        return Compound(compound)
+    else:
+        # Fallback to full intersection if filtering removes everything
+        return intersection
+
+
+def find_joint_contact_surfaces(
+    inserting_part: Part, 
+    receiving_part: Part, 
+    margin: float = 2
+) -> Tuple[Compound, Compound]:
+    """
+    Find both contact surfaces for a mortise-tenon style joint.
+    
+    This is the recommended way to extract contact surfaces for FEA analysis.
+    It correctly handles the two-step extraction:
+    1. Tenon = inserting_part faces inside receiving_part region
+    2. Mortise = receiving_part faces inside tenon region (NOT full inserting_part!)
+    
+    Args:
+        inserting_part: The part with the tenon/insert (e.g., beam)
+        receiving_part: The part with the mortise/pocket (e.g., post)
+        margin: Fixed amount (mm) to expand bbox on each side
+    
+    Returns:
+        Tuple of (tenon_contact, mortise_contact) Compounds
+    """
+    # Step 1: Find tenon surfaces (inserting part inside receiving part)
+    tenon_contact = find_contact_surface(inserting_part, receiving_part, margin)
+    
+    # Step 2: Find mortise surfaces using TENON bbox (not full inserting part!)
+    # This is critical - the tenon region defines exactly where the mortise is
+    mortise_contact = find_contact_surface(receiving_part, tenon_contact, margin)
+    
+    return tenon_contact, mortise_contact
+
+
+def find_mesh_contact_faces(
+    elements_a: List[Tuple[int, List[int]]],
+    nodes_a: dict,
+    elements_b: List[Tuple[int, List[int]]],
+    nodes_b: dict,
+    margin: float = 1.0
+) -> Tuple[List[Tuple[int, int]], List[Tuple[int, int]]]:
+    """
+    Find mesh element faces at the contact region between two meshed parts.
+    
+    Pure mesh-based approach - no CAD geometry needed:
+    1. Find boundary faces (faces only used by one element = surface faces)
+    2. Compute bounding boxes of both meshes
+    3. Find the intersection region of the bounding boxes (with margin)
+    4. Return boundary faces from each part that lie in the intersection region
+    
+    Args:
+        elements_a: Elements of mesh A as (element_id, [n1, n2, n3, n4]) tuples
+        nodes_a: Nodes of mesh A as {node_id: (x, y, z)}
+        elements_b: Elements of mesh B as (element_id, [n1, n2, n3, n4]) tuples
+        nodes_b: Nodes of mesh B as {node_id: (x, y, z)}
+        margin: Margin (mm) to expand the intersection region for tolerance
+    
+    Returns:
+        Tuple of (faces_a, faces_b) where each is a list of (element_id, face_number)
+        for CalculiX *SURFACE definition. Face numbers are 1-4 for C3D4 elements.
+    """
+    # C3D4 face definitions: which nodes form each face
+    face_node_indices = [
+        (0, 1, 2),  # S1
+        (0, 1, 3),  # S2
+        (1, 2, 3),  # S3
+        (0, 2, 3),  # S4
+    ]
+    
+    def get_boundary_faces(elements):
+        """
+        Find boundary faces - faces that appear in only one element.
+        Internal faces are shared by two elements, boundary faces are not.
+        Returns dict mapping (elem_id, face_num) to sorted node tuple.
+        """
+        # Count how many times each face (as sorted node tuple) appears
+        face_count = {}  # sorted_nodes -> [(elem_id, face_num), ...]
+        
+        for elem_id, elem_nodes in elements:
+            for face_idx, (i, j, k) in enumerate(face_node_indices):
+                n1, n2, n3 = elem_nodes[i], elem_nodes[j], elem_nodes[k]
+                face_key = tuple(sorted([n1, n2, n3]))
+                if face_key not in face_count:
+                    face_count[face_key] = []
+                face_count[face_key].append((elem_id, face_idx + 1))
+        
+        # Boundary faces appear exactly once
+        boundary_faces = {}
+        for face_key, occurrences in face_count.items():
+            if len(occurrences) == 1:
+                elem_id, face_num = occurrences[0]
+                boundary_faces[(elem_id, face_num)] = face_key
+        
+        return boundary_faces
+    
+    def get_mesh_bbox(nodes: dict):
+        """Get bounding box of mesh nodes."""
+        coords = list(nodes.values())
+        min_x = min(c[0] for c in coords)
+        max_x = max(c[0] for c in coords)
+        min_y = min(c[1] for c in coords)
+        max_y = max(c[1] for c in coords)
+        min_z = min(c[2] for c in coords)
+        max_z = max(c[2] for c in coords)
+        return (min_x, max_x, min_y, max_y, min_z, max_z)
+    
+    def bbox_intersection(bbox_a, bbox_b, margin):
+        """Find intersection of two bounding boxes, expanded by margin."""
+        min_x = max(bbox_a[0], bbox_b[0]) - margin
+        max_x = min(bbox_a[1], bbox_b[1]) + margin
+        min_y = max(bbox_a[2], bbox_b[2]) - margin
+        max_y = min(bbox_a[3], bbox_b[3]) + margin
+        min_z = max(bbox_a[4], bbox_b[4]) - margin
+        max_z = min(bbox_a[5], bbox_b[5]) + margin
+        
+        # Check if there's actually an intersection
+        if min_x > max_x or min_y > max_y or min_z > max_z:
+            return None
+        return (min_x, max_x, min_y, max_y, min_z, max_z)
+    
+    def face_in_bbox(face_nodes, nodes, bbox):
+        """Check if all 3 nodes of a face are inside the bounding box."""
+        for nid in face_nodes:
+            if nid not in nodes:
+                return False
+            x, y, z = nodes[nid]
+            if not (bbox[0] <= x <= bbox[1] and
+                    bbox[2] <= y <= bbox[3] and
+                    bbox[4] <= z <= bbox[5]):
+                return False
+        return True
+    
+    # Step 1: Find boundary faces for each mesh
+    print("  Finding boundary faces...")
+    boundary_a = get_boundary_faces(elements_a)
+    boundary_b = get_boundary_faces(elements_b)
+    print(f"  Mesh A: {len(boundary_a)} boundary faces, Mesh B: {len(boundary_b)} boundary faces")
+    
+    # Step 2: Get bounding boxes
+    bbox_a = get_mesh_bbox(nodes_a)
+    bbox_b = get_mesh_bbox(nodes_b)
+    
+    print(f"  Mesh A bbox: X[{bbox_a[0]:.1f}, {bbox_a[1]:.1f}] Y[{bbox_a[2]:.1f}, {bbox_a[3]:.1f}] Z[{bbox_a[4]:.1f}, {bbox_a[5]:.1f}]")
+    print(f"  Mesh B bbox: X[{bbox_b[0]:.1f}, {bbox_b[1]:.1f}] Y[{bbox_b[2]:.1f}, {bbox_b[3]:.1f}] Z[{bbox_b[4]:.1f}, {bbox_b[5]:.1f}]")
+    
+    # Step 3: Find intersection with margin
+    intersection = bbox_intersection(bbox_a, bbox_b, margin)
+    if intersection is None:
+        print("  No bounding box intersection found!")
+        return [], []
+    
+    print(f"  Intersection (±{margin}mm): X[{intersection[0]:.1f}, {intersection[1]:.1f}] Y[{intersection[2]:.1f}, {intersection[3]:.1f}] Z[{intersection[4]:.1f}, {intersection[5]:.1f}]")
+    
+    # Step 4: Filter boundary faces by intersection bbox
+    faces_a = []
+    for (elem_id, face_num), face_nodes in boundary_a.items():
+        if face_in_bbox(face_nodes, nodes_a, intersection):
+            faces_a.append((elem_id, face_num))
+    
+    faces_b = []
+    for (elem_id, face_num), face_nodes in boundary_b.items():
+        if face_in_bbox(face_nodes, nodes_b, intersection):
+            faces_b.append((elem_id, face_num))
+    
+    print(f"  Found {len(faces_a)} faces from mesh A, {len(faces_b)} faces from mesh B in contact region")
+    
+    return faces_a, faces_b
+
+
+# Keep the old function for CAD-based approach if needed
+def find_mesh_faces_on_surface(
+    elements: List[Tuple[int, List[int]]],
+    nodes: dict,
+    contact_surface: Compound,
+    tolerance: float = 1.0,
+    bbox_margin: float = 5.0
+) -> List[Tuple[int, int]]:
+    """
+    Find mesh element faces that lie on a CAD contact surface.
+    
+    Uses CAD surface bounding box for fast filtering.
+    For pure mesh-based contact detection, use find_mesh_contact_faces instead.
+    
+    Args:
+        elements: List of (element_id, [n1, n2, n3, n4]) tuples (C3D4 tetrahedra)
+        nodes: Dict mapping node_id to (x, y, z) coordinates
+        contact_surface: CAD Compound containing the contact faces
+        tolerance: Max distance (mm) from surface to consider a node "on" it
+        bbox_margin: Margin (mm) to expand bbox for filtering
+    
+    Returns:
+        List of (element_id, face_number) tuples for CalculiX *SURFACE definition
+    """
+    # C3D4 face definitions
+    face_node_indices = [
+        (0, 1, 2),  # S1
+        (0, 1, 3),  # S2
+        (1, 2, 3),  # S3
+        (0, 2, 3),  # S4
+    ]
+    
+    # Get bounding box of the CAD contact surface
+    bbox = contact_surface.bounding_box()
+    bbox_min_x = bbox.min.X - bbox_margin
+    bbox_max_x = bbox.max.X + bbox_margin
+    bbox_min_y = bbox.min.Y - bbox_margin
+    bbox_max_y = bbox.max.Y + bbox_margin
+    bbox_min_z = bbox.min.Z - bbox_margin
+    bbox_max_z = bbox.max.Z + bbox_margin
+    
+    # Find nodes in bbox
+    nodes_in_bbox = set()
+    for nid, (x, y, z) in nodes.items():
+        if (bbox_min_x <= x <= bbox_max_x and
+            bbox_min_y <= y <= bbox_max_y and
+            bbox_min_z <= z <= bbox_max_z):
+            nodes_in_bbox.add(nid)
+    
+    print(f"  Found {len(nodes_in_bbox)}/{len(nodes)} nodes in contact region bbox")
+    
+    # Find faces where all 3 nodes are in bbox
+    result = []
+    for elem_id, elem_nodes in elements:
+        for face_idx, (i, j, k) in enumerate(face_node_indices):
+            n1, n2, n3 = elem_nodes[i], elem_nodes[j], elem_nodes[k]
+            if n1 in nodes_in_bbox and n2 in nodes_in_bbox and n3 in nodes_in_bbox:
+                result.append((elem_id, face_idx + 1))
+    
+    print(f"  Found {len(result)} mesh faces in contact region")
+    return result
+
+
+# =============================================================================
+# Material and Analysis Configuration
+# =============================================================================
 
 
 @dataclass

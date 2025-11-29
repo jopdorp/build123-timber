@@ -42,6 +42,14 @@ from timber_joints.analysis import (
     analyze_element,
     analyze_frame,
     print_analysis_summary,
+    # Contact surface utilities
+    get_bbox_solid,
+    scale_shape_in_place,
+    expand_shape_by_margin,
+    find_contact_surface,
+    find_joint_contact_surfaces,
+    find_mesh_contact_faces,
+    find_mesh_faces_on_surface,
 )
 
 __all__ = [
@@ -80,4 +88,12 @@ __all__ = [
     "analyze_element",
     "analyze_frame",
     "print_analysis_summary",
+    # Contact surface utilities
+    "get_bbox_solid",
+    "scale_shape_in_place",
+    "expand_shape_by_margin",
+    "find_contact_surface",
+    "find_joint_contact_surfaces",
+    "find_mesh_contact_faces",
+    "find_mesh_faces_on_surface",
 ]
