@@ -492,9 +492,9 @@ print(f"\nMesh file: {mesh_file}")
 load_magnitude = 10000.0  # 10 kN = ~1 tonne total
 load_per_node = load_magnitude / len(load_nodes) if load_nodes else 0
 
-# Friction parameters
-friction_coeff = 0.2  # Moderate friction for wood contact
-stick_slope = 2000.0  # Tangential penalty stiffness  
+# Friction parameters - realistic wood-on-wood values
+friction_coeff = 0.35  # Wood-on-wood static friction (typical range 0.25-0.5)
+stick_slope = 1000.0  # Tangential penalty ≈ normal penalty for balanced behavior
 stabilize = 0.01  # Friction stabilization (damping for convergence)
 
 ccx_lines = [
