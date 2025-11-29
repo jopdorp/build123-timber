@@ -2,7 +2,7 @@
 
 import math
 from typing import Tuple
-from build123d import Align, Box, Part, Location, Polyline, make_face, extrude, loft, Sketch, Rectangle, Plane
+from build123d import Align, Axis, Box, Part, Location, Polyline, make_face, extrude, loft, Sketch, Rectangle, Plane
 
 
 def get_shape_dimensions(shape) -> Tuple[Part, float, float, float]:
@@ -183,3 +183,86 @@ def create_dovetail_cut(
     # Loft between the two faces and position
     dovetail = loft([base_face, tip_face])
     return dovetail.move(Location((0, y_center, z_center)))
+
+
+def create_vertical_cut(post: Part, cut_class, at_top: bool = True, **cut_kwargs) -> Part:
+    """Apply a horizontal joint cut class to a vertical post.
+    
+    This utility rotates the post to horizontal orientation, applies the cut
+    using any joint class (Tenon, ShoulderedTenon, DovetailInsert, etc.),
+    then rotates the result back to vertical.
+    
+    Args:
+        post: The vertical post Part (oriented along Z axis)
+        cut_class: A joint class that takes a beam/Part as first argument
+                   (e.g., Tenon, ShoulderedTenon, DovetailInsert)
+        at_top: If True, cut at top of post (Z+); if False, cut at bottom (Z-)
+        **cut_kwargs: Additional keyword arguments passed to the cut class
+                      (e.g., tenon_width, tenon_height, tenon_length)
+    
+    Returns:
+        Post Part with the cut applied
+        
+    Example:
+        >>> from timber_joints.tenon import Tenon
+        >>> post_with_tenon = create_vertical_cut(
+        ...     post,
+        ...     Tenon,
+        ...     at_top=True,
+        ...     tenon_width=50,
+        ...     tenon_height=100,
+        ...     tenon_length=60,
+        ... )
+    """
+    # Get post position for restoration
+    bbox = post.bounding_box()
+    original_min_x = bbox.min.X
+    original_min_y = bbox.min.Y
+    original_min_z = bbox.min.Z
+    
+    # Move post so Z starts at 0 and XY are centered at origin
+    post_center_x = (bbox.min.X + bbox.max.X) / 2
+    post_center_y = (bbox.min.Y + bbox.max.Y) / 2
+    post_at_origin = post.move(Location((-post_center_x, -post_center_y, -original_min_z)))
+    
+    # Rotate post from vertical (Z) to horizontal (X)
+    # Rotate +90° around Y axis: Z+ becomes X+ (post extends in +X direction)
+    post_horizontal = post_at_origin.rotate(Axis.Y, 90)
+    
+    # Now the beam should go from X=0 to X=height, centered on Y and Z
+    # But Tenon expects beam starting at origin with Y and Z from 0
+    # Move to align with origin
+    h_bbox = post_horizontal.bounding_box()
+    post_horizontal = post_horizontal.move(Location((
+        -h_bbox.min.X,  # Move so X starts at 0
+        -h_bbox.min.Y,  # Move so Y starts at 0
+        -h_bbox.min.Z,  # Move so Z starts at 0
+    )))
+    
+    # Apply the cut class
+    # at_top=True means cut at original Z+ which is now X+ (at_start=False)
+    # at_top=False means cut at original Z- which is now X=0 (at_start=True)
+    cut_kwargs['at_start'] = not at_top
+    
+    # Create the cut - the class will use .shape property to get the result
+    cut_instance = cut_class(beam=post_horizontal, **cut_kwargs)
+    cut_result = cut_instance.shape
+    
+    # Move back to centered position before rotation
+    r_bbox = cut_result.bounding_box()
+    cut_centered = cut_result.move(Location((
+        -r_bbox.min.X,  # X starts at 0
+        -(r_bbox.min.Y + r_bbox.max.Y) / 2,  # Center on Y
+        -(r_bbox.min.Z + r_bbox.max.Z) / 2,  # Center on Z
+    )))
+    
+    # Rotate back to vertical (-90° around Y)
+    result_vertical = cut_centered.rotate(Axis.Y, -90)
+    
+    # Move back to original position
+    v_bbox = result_vertical.bounding_box()
+    return result_vertical.move(Location((
+        original_min_x - v_bbox.min.X + (bbox.max.X - bbox.min.X - (v_bbox.max.X - v_bbox.min.X)) / 2,
+        original_min_y - v_bbox.min.Y + (bbox.max.Y - bbox.min.Y - (v_bbox.max.Y - v_bbox.min.Y)) / 2,
+        original_min_z - v_bbox.min.Z,
+    )))

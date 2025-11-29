@@ -38,15 +38,21 @@ def expand_shape_by_margin(shape: Part, margin: float) -> Part:
     Unlike uniform scaling, this calculates independent scale factors per axis
     to achieve the same absolute margin expansion on each side.
     
+    Note: This function creates a copy of the input shape to avoid mutation.
+    
     Args:
         shape: The shape to expand
         margin: Fixed amount (mm) to add to each side of each axis
     
     Returns:
-        The shape scaled non-uniformly to achieve the margin expansion
+        A new shape scaled non-uniformly to achieve the margin expansion
     """
+    import copy
     from OCP.gp import gp_GTrsf, gp_XYZ
     from OCP.BRepBuilderAPI import BRepBuilderAPI_GTransform
+    
+    # Deep copy to avoid mutating the original
+    shape = copy.deepcopy(shape)
     
     bbox = shape.bounding_box()
     center = bbox.center()

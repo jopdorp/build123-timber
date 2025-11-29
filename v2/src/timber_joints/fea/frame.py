@@ -27,7 +27,6 @@ from .calculix import (
     BEAM_HORIZONTAL_X,
     POST_VERTICAL_Z,
 )
-from ..analysis import expand_shape_by_margin
 
 
 class MemberType(Enum):
@@ -175,14 +174,12 @@ class TimberFrame:
         if output_dir is None:
             output_dir = Path("./fea_output")
         
-        # Build FEA parts - shrink beams slightly for contact gap
-        # Important: deepcopy shapes to avoid modifying the original members
+        # Build FEA parts
+        # Note: No shrinkage needed - the gap is built into the geometry
+        # via create_receiving_cut margin parameter
         parts = []
         for member in self.members:
-            if member.is_beam:
-                shape = expand_shape_by_margin(copy.deepcopy(member.shape), -self.contact_gap)
-            else:
-                shape = copy.deepcopy(member.shape)
+            shape = copy.deepcopy(member.shape)
             parts.append(FEAPart(member.name, shape, member.orientation))
         
         # Auto-detect contacts
