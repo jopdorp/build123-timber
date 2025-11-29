@@ -10,10 +10,12 @@ from timber_joints.alignment import build_complete_bent
 from timber_joints.analysis import (
     expand_shape_by_margin,
     find_mesh_contact_faces,
+    build_mesh_faces_compound,
     TimberMaterial,
 )
 from build123d import Location
 
+reset_show()
 
 # Build bent and scale beam down for contact gap
 left_post, right_post, beam_positioned, _ = build_complete_bent(
@@ -26,16 +28,10 @@ left_post, right_post, beam_positioned, _ = build_complete_bent(
     post_top_extension=300,
 )
 
+margin_gap = 1.0  # mm gap at contact surfaces - needs to be large enough to clear mortise depth
 # Scale beam down slightly to create contact gap
-beam_with_gap = expand_shape_by_margin(beam_positioned, -1.0)
+beam_with_gap = expand_shape_by_margin(beam_positioned, -margin_gap)
 
-# Show geometry
-reset_show()
-show_object(left_post, name="Left Post", options={"color": "sienna", "alpha": 0.3})
-show_object(right_post, name="Right Post", options={"color": "sienna", "alpha": 0.3})
-show_object(beam_with_gap, name="Beam", options={"color": "burlywood", "alpha": 0.3})
-
-# %%
 # Mesh parts and run FEA
 
 from examples.fea_pipeline import (
@@ -43,7 +39,7 @@ from examples.fea_pipeline import (
     analyze_results,
     read_frd_nodes,
 )
-from build123d import Location, export_step
+from build123d import export_step
 import numpy as np
 import gmsh
 
@@ -88,7 +84,7 @@ def mesh_part(step_file: str, part_name: str, mesh_size: float):
         )
     
     # Get C3D4 elements (4-node tetrahedra)
-    elem_types, elem_tags, elem_node_tags = gmsh.model.mesh.getElements(dim=3)
+    elem_types, _, elem_node_tags = gmsh.model.mesh.getElements(dim=3)
     elements = []
     for i, elem_type in enumerate(elem_types):
         if elem_type == 4:  # C3D4
@@ -99,8 +95,8 @@ def mesh_part(step_file: str, part_name: str, mesh_size: float):
     # Get surface faces for contact
     surfaces = gmsh.model.getEntities(dim=2)
     surface_elements = {}
-    for dim, tag in surfaces:
-        elem_types_s, elem_tags_s, elem_node_tags_s = gmsh.model.mesh.getElements(dim=2, tag=tag)
+    for _, tag in surfaces:
+        elem_types_s, _, elem_node_tags_s = gmsh.model.mesh.getElements(dim=2, tag=tag)
         faces = []
         for i, et in enumerate(elem_types_s):
             if et == 2:  # 3-node triangles
@@ -202,29 +198,100 @@ print(f"  Left post fixed nodes: {len(fixed_nodes_left)}")
 print(f"  Right post fixed nodes: {len(fixed_nodes_right)}")
 print(f"  Load nodes: {len(load_nodes)}")
 
-# Create element lists with proper structure (with offsets applied)
-left_post_elements = [(eid, nodes) for eid, nodes in all_elements if eid in left_elem_ids]
-right_post_elements = [(eid, nodes) for eid, nodes in all_elements if eid in right_elem_ids]
-beam_elements_list = [(eid, nodes) for eid, nodes in all_elements if eid in beam_elem_ids]
-
-# Find contact faces using pure mesh-based approach (no CAD needed!)
-# Uses bbox intersection of the two meshes to find where they meet
+# Find contact faces using original per-part meshes (before renumbering)
+# This matches how test_visual_contact_surfaces.py works
 print("\nFinding contact faces from mesh bbox intersection...")
-left_beam_faces, left_post_faces = find_mesh_contact_faces(
-    beam_elements_list, all_nodes,
-    left_post_elements, all_nodes,
-    margin=mesh_size  # Use mesh size as margin to capture all contact faces
+
+# Convert raw element lists to (elem_id, nodes) format for find_mesh_contact_faces
+beam_elements_for_contact = [(i + 1, elem) for i, elem in enumerate(beam_elements)]
+left_post_elements_for_contact = [(i + 1, elem) for i, elem in enumerate(left_elements)]
+right_post_elements_for_contact = [(i + 1, elem) for i, elem in enumerate(right_elements)]
+
+# Find contacts using original nodes (no offsets)
+left_beam_faces_orig, left_post_faces_orig = find_mesh_contact_faces(
+    beam_elements_for_contact, beam_nodes,
+    left_post_elements_for_contact, left_nodes,
+    margin=mesh_size + margin_gap
 )
 
-right_beam_faces, right_post_faces = find_mesh_contact_faces(
-    beam_elements_list, all_nodes,
-    right_post_elements, all_nodes,
-    margin=mesh_size
+right_beam_faces_orig, right_post_faces_orig = find_mesh_contact_faces(
+    beam_elements_for_contact, beam_nodes,
+    right_post_elements_for_contact, right_nodes,
+    margin=mesh_size + margin_gap
 )
+
+# Map element IDs to combined mesh IDs
+# beam: elem_id -> elem_id + beam_elem_offset
+# left_post: elem_id -> elem_id + left_elem_offset  
+# right_post: elem_id -> elem_id + right_elem_offset
+left_beam_faces = [(eid + beam_elem_offset, face) for eid, face in left_beam_faces_orig]
+left_post_faces = [(eid + left_elem_offset, face) for eid, face in left_post_faces_orig]
+right_beam_faces = [(eid + beam_elem_offset, face) for eid, face in right_beam_faces_orig]
+right_post_faces = [(eid + right_elem_offset, face) for eid, face in right_post_faces_orig]
 
 print(f"\nContact surfaces (element faces):")
 print(f"  Left joint - beam faces: {len(left_beam_faces)}, post faces: {len(left_post_faces)}")
 print(f"  Right joint - beam faces: {len(right_beam_faces)}, post faces: {len(right_post_faces)}")
+
+# Visualize the contact faces using original per-part meshes
+# (cleaner than using combined mesh with offsets)
+left_beam_compound = build_mesh_faces_compound(
+    left_beam_faces_orig, beam_elements_for_contact, beam_nodes
+)
+left_post_compound = build_mesh_faces_compound(
+    left_post_faces_orig, left_post_elements_for_contact, left_nodes
+)
+right_beam_compound = build_mesh_faces_compound(
+    right_beam_faces_orig, beam_elements_for_contact, beam_nodes
+)
+right_post_compound = build_mesh_faces_compound(
+    right_post_faces_orig, right_post_elements_for_contact, right_nodes
+)
+
+# Build full mesh boundary surfaces for visualization
+# Get all boundary faces (faces appearing only once = surface faces)
+def get_all_boundary_faces(elements):
+    """Get all boundary faces from a mesh."""
+    face_node_indices = [(0, 1, 2), (0, 1, 3), (1, 2, 3), (0, 2, 3)]
+    face_count = {}
+    for elem_id, elem_nodes in elements:
+        for face_idx, (i, j, k) in enumerate(face_node_indices):
+            n1, n2, n3 = elem_nodes[i], elem_nodes[j], elem_nodes[k]
+            face_key = tuple(sorted([n1, n2, n3]))
+            if face_key not in face_count:
+                face_count[face_key] = []
+            face_count[face_key].append((elem_id, face_idx + 1))
+    # Return only boundary faces (appear once)
+    return [(eid, fnum) for key, occs in face_count.items() if len(occs) == 1 for eid, fnum in occs]
+
+beam_all_boundary = get_all_boundary_faces(beam_elements_for_contact)
+left_post_all_boundary = get_all_boundary_faces(left_post_elements_for_contact)
+right_post_all_boundary = get_all_boundary_faces(right_post_elements_for_contact)
+
+beam_mesh_compound = build_mesh_faces_compound(beam_all_boundary, beam_elements_for_contact, beam_nodes)
+left_post_mesh_compound = build_mesh_faces_compound(left_post_all_boundary, left_post_elements_for_contact, left_nodes)
+right_post_mesh_compound = build_mesh_faces_compound(right_post_all_boundary, right_post_elements_for_contact, right_nodes)
+
+reset_show()
+
+# Y offset for side-by-side comparison
+y_offset = 500
+
+# Contact surfaces (original position)
+show_object(left_beam_compound, name="Left Beam Contact", options={"color": "red"})
+show_object(left_post_compound, name="Left Post Contact", options={"color": "blue"})
+show_object(right_beam_compound, name="Right Beam Contact", options={"color": "orange"})
+show_object(right_post_compound, name="Right Post Contact", options={"color": "cyan"})
+
+# Full meshes offset in Y for comparison
+show_object(beam_mesh_compound.moved(Location((0, y_offset, 0))), name="Beam Mesh", options={"color": "burlywood"})
+show_object(left_post_mesh_compound.moved(Location((0, y_offset, 0))), name="Left Post Mesh", options={"color": "sienna", "alpha": 0.3})
+show_object(right_post_mesh_compound.moved(Location((0, y_offset, 0))), name="Right Post Mesh", options={"color": "sienna", "alpha": 0.3})
+
+print("\nVisualized contact surfaces (front) and full meshes (offset in Y)!")
+
+# %% 
+# Write mesh file and run FEA
 
 mesh_file = str(output_dir / "mesh.inp")
 with open(mesh_file, 'w') as f:
@@ -291,7 +358,7 @@ with open(mesh_file, 'w') as f:
 print(f"\nMesh file: {mesh_file}")
 
 # Write CalculiX input with contact pairs and friction
-load_magnitude = 10000.0  # 10 kN
+load_magnitude = 10000.0  # 10 kN = ~1 tonne
 load_per_node = load_magnitude / len(load_nodes) if load_nodes else 0
 
 # Friction coefficient for wood-on-wood
@@ -315,12 +382,12 @@ ccx_lines = [
     "",
     "*SOLID SECTION, ELSET=TIMBER, MATERIAL=" + material.name,
     "",
-    "** Surface interaction definition with friction",
-    "*SURFACE INTERACTION, NAME=WOOD_FRICTION",
-    "*FRICTION",
-    f"{friction_coeff}, 1e5",  # friction coeff, stick slope (lower = easier convergence)
+    "** Surface interaction definition - frictionless contact",
+    "** (Friction causes convergence issues, frictionless is conservative)",
+    "*SURFACE INTERACTION, NAME=WOOD_CONTACT",
+    "** Using LINEAR penalty contact",
     "*SURFACE BEHAVIOR, PRESSURE-OVERCLOSURE=LINEAR",
-    "1e4, 0.0, 1e4",  # Softer contact stiffness, clearance at zero pressure, K_infinity
+    f"1e3, 0.0, {margin_gap}",  # slope K, sigma_inf=0, c0 = margin_gap
     "",
 ]
 
@@ -328,11 +395,12 @@ ccx_lines = [
 # In CalculiX contact: slave surface, master surface
 # Smaller/finer mesh should be slave, larger/coarser should be master
 # For mortise-tenon: beam tenon (slave) contacts post mortise (master)
+# ADJUST closes the initial gap automatically
 
 if left_beam_faces and left_post_faces:
     ccx_lines.extend([
         "** Left joint contact pair (beam tenon to post mortise)",
-        "*CONTACT PAIR, INTERACTION=WOOD_FRICTION, TYPE=SURFACE TO SURFACE",
+        f"*CONTACT PAIR, INTERACTION=WOOD_CONTACT, TYPE=NODE TO SURFACE, ADJUST={margin_gap + 1}",
         "LEFT_BEAM_SURF, LEFT_POST_SURF",
         "",
     ])
@@ -340,10 +408,22 @@ if left_beam_faces and left_post_faces:
 if right_beam_faces and right_post_faces:
     ccx_lines.extend([
         "** Right joint contact pair (beam tenon to post mortise)",
-        "*CONTACT PAIR, INTERACTION=WOOD_FRICTION, TYPE=SURFACE TO SURFACE",
+        f"*CONTACT PAIR, INTERACTION=WOOD_CONTACT, TYPE=NODE TO SURFACE, ADJUST={margin_gap + 1}",
         "RIGHT_BEAM_SURF, RIGHT_POST_SURF",
         "",
     ])
+
+# Relaxed convergence controls for contact
+ccx_lines.extend([
+    "** Relaxed convergence for contact problems",
+    "*CONTROLS, PARAMETERS=TIME INCREMENTATION",
+    "20,30,9,200,10,4,,5",  # More iterations, larger cutbacks allowed
+    "*CONTROLS, PARAMETERS=FIELD, FIELD=DISPLACEMENT",
+    "0.25, 0.5, 1e-5, ,0.02, 1e-5",  # Relaxed convergence
+    "*CONTROLS, PARAMETERS=CONTACT",
+    "0.001, 0.1, 100, 200",  # delcon, alea, kscalemax (int>=1), itf2f (int>=1)
+    "",
+])
 
 ccx_lines.extend([
     "** Boundary Conditions - Posts fixed at foundation",
@@ -359,9 +439,9 @@ for node in fixed_nodes_right:
 ccx_lines.extend([
     "",
     "** Analysis step - nonlinear static for contact",
-    "*STEP, NLGEOM, INC=10",
+    "*STEP, NLGEOM, INC=100",
     "*STATIC",
-    "0.1, 1.0, 0.001, 0.5",  # Initial time inc, total time, min inc, max inc
+    "0.01, 1.0, 1e-6, 0.1",  # Smaller initial inc, more gradual loading
     "",
     "** Load at beam midspan",
     "*CLOAD",
@@ -378,7 +458,7 @@ ccx_lines.extend([
     "*EL FILE",
     "S, E",  # Stresses and strains
     "*CONTACT FILE",
-    "CSTR, PCON",  # Contact stress and contact pressure
+    "CDIS, CSTR",  # Contact distance and contact stress (PCON only for dynamics)
     "",
     "*END STEP",
 ])
@@ -389,13 +469,42 @@ with open(ccx_file, 'w') as f:
 
 print(f"\nCalculiX input: {ccx_file}")
 print(f"Load: {load_magnitude} N at beam midspan")
-print(f"Joint model: Contact pairs with friction (mu={friction_coeff})")
+print(f"Joint model: Contact pairs (frictionless - friction causes convergence issues)")
 print(f"Contact surfaces: {len(left_beam_faces) + len(right_beam_faces)} beam faces, "
       f"{len(left_post_faces) + len(right_post_faces)} post faces")
 
-# Run CalculiX
+# Run CalculiX with full output
 print("\nRunning FEA solver...")
-success, frd_file = run_calculix(ccx_file)
+import subprocess
+from pathlib import Path
+
+ccx_path = Path(ccx_file)
+work_dir = ccx_path.parent
+job_name = ccx_path.stem
+
+cmd = ["ccx", "-i", job_name]
+print(f"Running: {' '.join(cmd)} (in {work_dir})")
+
+result = subprocess.run(
+    cmd,
+    cwd=work_dir,
+    capture_output=True,
+    text=True,
+    timeout=600,
+)
+
+# Print FULL solver output
+print("\n" + "="*60)
+print("CALCULIX SOLVER OUTPUT")
+print("="*60)
+print(result.stdout)
+if result.stderr:
+    print("\nSTDERR:")
+    print(result.stderr)
+print("="*60)
+
+success = result.returncode == 0
+frd_file = str(work_dir / f"{job_name}.frd") if success else None
 
 if success:
     # Analyze results
@@ -437,9 +546,9 @@ if results and "displacements" in results:
                 if len(parts) == 5:  # elem_id, n1, n2, n3, n4
                     elements.append(parts[1:])  # Just the nodes
     
-    # Scale factor for visualization - keep it reasonable
-    # Typical deflection might be 1-10mm, scale by 10x to make visible
-    scale_factor = 10.0
+    # Scale factor for visualization - make deformation clearly visible
+    # Max deflection is ~0.5mm, need large scale to see on 5000mm beam
+    scale_factor = 500.0  # Exaggerated for visibility
     
     # Calculate displacement magnitudes
     disp_mag = {}
@@ -530,7 +639,7 @@ print(f"  Load: {load_magnitude} N at beam midspan")
 print(f"  Boundary: Posts fixed at foundation (Z=0)")
 print(f"\nJoint Model:")
 print(f"  - Parts meshed separately (3 bodies)")
-print(f"  - Contact pairs with friction (mu={friction_coeff})")
+print(f"  - Contact pairs (frictionless contact)")
 print(f"  - Contact surfaces: beam tenon faces <-> post mortise faces")
 print(f"  - Surface-to-surface contact formulation")
 

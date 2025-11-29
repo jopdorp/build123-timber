@@ -50,6 +50,7 @@ from timber_joints.analysis import (
     find_joint_contact_surfaces,
     find_mesh_contact_faces,
     find_mesh_faces_on_surface,
+    build_mesh_faces_compound,
 )
 
 __all__ = [
@@ -96,4 +97,5 @@ __all__ = [
     "find_joint_contact_surfaces",
     "find_mesh_contact_faces",
     "find_mesh_faces_on_surface",
+    "build_mesh_faces_compound",
 ]

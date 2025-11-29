@@ -246,6 +246,8 @@ def find_mesh_contact_faces(
     def get_mesh_bbox(nodes: dict):
         """Get bounding box of mesh nodes."""
         coords = list(nodes.values())
+        if not coords:
+            return None
         min_x = min(c[0] for c in coords)
         max_x = max(c[0] for c in coords)
         min_y = min(c[1] for c in coords)
@@ -290,6 +292,10 @@ def find_mesh_contact_faces(
     bbox_a = get_mesh_bbox(nodes_a)
     bbox_b = get_mesh_bbox(nodes_b)
     
+    if bbox_a is None or bbox_b is None:
+        print("  Could not compute bounding boxes!")
+        return [], []
+    
     print(f"  Mesh A bbox: X[{bbox_a[0]:.1f}, {bbox_a[1]:.1f}] Y[{bbox_a[2]:.1f}, {bbox_a[3]:.1f}] Z[{bbox_a[4]:.1f}, {bbox_a[5]:.1f}]")
     print(f"  Mesh B bbox: X[{bbox_b[0]:.1f}, {bbox_b[1]:.1f}] Y[{bbox_b[2]:.1f}, {bbox_b[3]:.1f}] Z[{bbox_b[4]:.1f}, {bbox_b[5]:.1f}]")
     
@@ -315,6 +321,64 @@ def find_mesh_contact_faces(
     print(f"  Found {len(faces_a)} faces from mesh A, {len(faces_b)} faces from mesh B in contact region")
     
     return faces_a, faces_b
+
+
+# C3D4 face node indices (used by multiple functions)
+C3D4_FACE_NODE_INDICES = [(0, 1, 2), (0, 1, 3), (1, 2, 3), (0, 2, 3)]
+
+
+def build_mesh_faces_compound(
+    mesh_faces: List[Tuple[int, int]],
+    elements: List[Tuple[int, List[int]]],
+    nodes: dict
+) -> Compound:
+    """
+    Build a build123d Compound of triangular faces from mesh face definitions.
+    
+    Useful for visualizing contact surfaces or any mesh faces in OCP viewer.
+    
+    Args:
+        mesh_faces: List of (element_id, face_number) tuples where face_number is 1-4
+        elements: List of (element_id, [n1, n2, n3, n4]) tuples (C3D4 tetrahedra)
+        nodes: Dict mapping node_id to (x, y, z) coordinates
+    
+    Returns:
+        A build123d Compound containing triangular faces for visualization
+    """
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakePolygon, BRepBuilderAPI_MakeFace
+    from OCP.gp import gp_Pnt
+    from OCP.BRep import BRep_Builder
+    from OCP.TopoDS import TopoDS_Compound
+    
+    elem_dict = {eid: enodes for eid, enodes in elements}
+    builder = BRep_Builder()
+    compound = TopoDS_Compound()
+    builder.MakeCompound(compound)
+    
+    for elem_id, face_num in mesh_faces:
+        if elem_id not in elem_dict:
+            continue
+        elem_nodes = elem_dict[elem_id]
+        i, j, k = C3D4_FACE_NODE_INDICES[face_num - 1]  # face_num is 1-based
+        n1, n2, n3 = elem_nodes[i], elem_nodes[j], elem_nodes[k]
+        
+        if n1 not in nodes or n2 not in nodes or n3 not in nodes:
+            continue
+        
+        p1 = gp_Pnt(*nodes[n1])
+        p2 = gp_Pnt(*nodes[n2])
+        p3 = gp_Pnt(*nodes[n3])
+        
+        try:
+            polygon = BRepBuilderAPI_MakePolygon(p1, p2, p3, True)
+            if polygon.IsDone():
+                face_maker = BRepBuilderAPI_MakeFace(polygon.Wire(), True)
+                if face_maker.IsDone():
+                    builder.Add(compound, face_maker.Face())
+        except Exception:
+            pass
+    
+    return Compound(compound)
 
 
 # Keep the old function for CAD-based approach if needed
