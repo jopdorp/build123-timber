@@ -91,9 +91,14 @@ class TimberFrame:
     - Member types (post vs beam) from geometry
     - Contacts between adjacent members
     - Fixed supports at post bases
+    - Self-weight loads distributed across members
     """
     members: List[FrameMember] = field(default_factory=list)
     contact_gap: float = 0.5  # Gap for contact analysis
+    timber_density: float = 500.0  # kg/m³
+    
+    # Physical constants
+    GRAVITY: float = 9.81  # m/s²
     
     def add_member(self, name: str, shape: Part, member_type: MemberType = None) -> "TimberFrame":
         """Add a member to the frame. Returns self for chaining."""
@@ -109,6 +114,117 @@ class TimberFrame:
     def beams(self) -> List[FrameMember]:
         """Get all beam members."""
         return [m for m in self.members if m.is_beam]
+    
+    def _generate_self_weight_loads(self, verbose: bool = True) -> tuple[List[LoadBC], float]:
+        """Generate self-weight loads for all members.
+        
+        Divides each member into 3 equal parts and applies 1/3 of its weight
+        at the center of each part (downward, dof=3).
+        
+        Returns:
+            Tuple of (list of LoadBC, total weight in N)
+        """
+        loads = []
+        total_weight = 0.0
+        
+        for member in self.members:
+            bbox = member.bbox
+            
+            # Calculate volume in m³ (dimensions are in mm)
+            volume_mm3 = member.shape.volume
+            volume_m3 = volume_mm3 / 1e9  # mm³ to m³
+            
+            # Calculate weight
+            mass_kg = volume_m3 * self.timber_density
+            weight_n = mass_kg * self.GRAVITY
+            total_weight += weight_n
+            
+            # Determine primary axis (longest dimension)
+            dx = bbox.max.X - bbox.min.X
+            dy = bbox.max.Y - bbox.min.Y
+            dz = bbox.max.Z - bbox.min.Z
+            
+            # Generate 3 load points along the longest axis
+            third_weight = weight_n / 3
+            
+            # Center coordinates
+            cx = (bbox.min.X + bbox.max.X) / 2
+            cy = (bbox.min.Y + bbox.max.Y) / 2
+            
+            if dz > dx and dz > dy:
+                # Vertical member (post) - divide along Z
+                positions = [
+                    bbox.min.Z + dz * (1/6),
+                    bbox.min.Z + dz * (3/6),
+                    bbox.min.Z + dz * (5/6),
+                ]
+                for i, pz in enumerate(positions):
+                    def make_filter(name, px, py, pz_target, tol=70.0):
+                        def filter_fn(nid, x, y, z, part, mesh):
+                            return (part == name and 
+                                    abs(x - px) < tol and 
+                                    abs(y - py) < tol and 
+                                    abs(z - pz_target) < tol)
+                        return filter_fn
+                    
+                    loads.append(LoadBC(
+                        f"{member.name}_sw_{i}",
+                        make_filter(member.name, cx, cy, pz),
+                        dof=3,
+                        total_load=-third_weight
+                    ))
+            elif dx > dy:
+                # Horizontal member along X (beam) - divide along X
+                positions = [
+                    bbox.min.X + dx * (1/6),
+                    bbox.min.X + dx * (3/6),
+                    bbox.min.X + dx * (5/6),
+                ]
+                top_z = bbox.max.Z
+                for i, px in enumerate(positions):
+                    def make_filter(name, px_target, py, pz, tol=70.0):
+                        def filter_fn(nid, x, y, z, part, mesh):
+                            return (part == name and 
+                                    abs(x - px_target) < tol and 
+                                    abs(y - py) < tol and 
+                                    abs(z - pz) < 35.0)
+                        return filter_fn
+                    
+                    loads.append(LoadBC(
+                        f"{member.name}_sw_{i}",
+                        make_filter(member.name, px, cy, top_z),
+                        dof=3,
+                        total_load=-third_weight
+                    ))
+            else:
+                # Horizontal member along Y (girt) - divide along Y
+                positions = [
+                    bbox.min.Y + dy * (1/6),
+                    bbox.min.Y + dy * (3/6),
+                    bbox.min.Y + dy * (5/6),
+                ]
+                top_z = bbox.max.Z
+                for i, py in enumerate(positions):
+                    def make_filter(name, px, py_target, pz, tol=70.0):
+                        def filter_fn(nid, x, y, z, part, mesh):
+                            return (part == name and 
+                                    abs(x - px) < tol and 
+                                    abs(y - py_target) < tol and 
+                                    abs(z - pz) < 35.0)
+                        return filter_fn
+                    
+                    loads.append(LoadBC(
+                        f"{member.name}_sw_{i}",
+                        make_filter(member.name, cx, py, top_z),
+                        dof=3,
+                        total_load=-third_weight
+                    ))
+        
+        if verbose:
+            print(f"Self-weight: {total_weight / self.GRAVITY:.1f} kg ({total_weight:.1f} N)")
+            print(f"  {len(loads)} load points (3 per member)")
+        
+        return loads, total_weight
     
     def _find_contacts(self) -> List[tuple[str, str]]:
         """Find pairs of members that are in contact.
@@ -144,9 +260,10 @@ class TimberFrame:
     
     def analyze(
         self,
-        load: float = 10000.0,
+        load: float = 0.0,
         load_location: Optional[Callable[[float, float, float], bool]] = None,
         additional_loads: Optional[List[LoadBC]] = None,
+        include_self_weight: bool = True,
         mesh_size: float = 50.0,
         mesh_size_fine: float = 20.0,
         output_dir: Path = None,
@@ -158,13 +275,16 @@ class TimberFrame:
         - Creates contact gap on beams
         - Detects contacts between members
         - Fixes posts at their bases
+        - Applies self-weight loads (can be disabled)
         - Applies load at beam midspan (or custom location)
         
         Args:
-            load: Total load to apply (N), negative for downward
+            load: Total load to apply at main location (N), negative for downward.
+                  Set to 0 to skip main load (e.g., when using only additional_loads).
             load_location: Optional function (x,y,z) -> bool for load nodes.
                           Defaults to beam midspan top surface.
             additional_loads: Optional list of additional LoadBC objects
+            include_self_weight: Include self-weight of timber members (default True)
             mesh_size: Base mesh element size (mm)
             mesh_size_fine: Fine mesh at contacts (mm)
             output_dir: Directory for output files
@@ -232,7 +352,17 @@ class TimberFrame:
                 return load_location(x, y, z)
             load_location_fn = wrapped_load
         
-        load_bcs = [LoadBC("main_load", load_location_fn, dof=3, total_load=load)]
+        # Build load BCs
+        load_bcs = []
+        
+        # Add self-weight loads first
+        if include_self_weight:
+            self_weight_loads, _ = self._generate_self_weight_loads(verbose=verbose)
+            load_bcs.extend(self_weight_loads)
+        
+        # Add main load only if non-zero
+        if load != 0.0:
+            load_bcs.append(LoadBC("main_load", load_location_fn, dof=3, total_load=load))
         
         # Add any additional loads
         if additional_loads:

@@ -178,21 +178,19 @@ print(f"  - Total members: {len(frame.members)}")
 print()
 
 # Define additional loads on girts
-# Right girt: 1/4 along Y (Y=1537.5mm), 0.5 tonne downward = 500kg * 9.81 = 4905 N
+# Right girt: 1/4 along Y, 300kg downward = 300kg * 9.81 = 2943 N
 right_girt_bbox = right_girt.bounding_box()
 right_girt_y_quarter = right_girt_bbox.min.Y + (right_girt_bbox.max.Y - right_girt_bbox.min.Y) * 0.25
 right_girt_top_z = right_girt_bbox.max.Z
-right_girt_center_x = (right_girt_bbox.min.X + right_girt_bbox.max.X) / 2
 
 def right_girt_load_filter(nid, x, y, z, part, mesh):
     return (part == "right_girt" and 
             abs(y - right_girt_y_quarter) < 70.0 and 
             abs(z - right_girt_top_z) < 35.0)
 
-# Left girt: 3/4 along Y (Y=4612.5mm), 100kg sideways (positive X) = 100kg * 9.81 = 981 N
+# Left girt: 3/4 along Y, 100kg sideways (positive X) = 100kg * 9.81 = 981 N
 left_girt_bbox = left_girt.bounding_box()
 left_girt_y_threequarter = left_girt_bbox.min.Y + (left_girt_bbox.max.Y - left_girt_bbox.min.Y) * 0.75
-left_girt_center_z = (left_girt_bbox.min.Z + left_girt_bbox.max.Z) / 2
 left_girt_right_x = left_girt_bbox.max.X  # Apply on right side of left girt
 
 def left_girt_load_filter(nid, x, y, z, part, mesh):
@@ -201,17 +199,17 @@ def left_girt_load_filter(nid, x, y, z, part, mesh):
             abs(x - left_girt_right_x) < 35.0)
 
 additional_loads = [
-    LoadBC("right_girt_load", right_girt_load_filter, dof=3, total_load=-4905.0),  # 0.5 tonne down
-    LoadBC("left_girt_load", left_girt_load_filter, dof=1, total_load=981.0),      # 100kg sideways +X
+    LoadBC("right_girt_load", right_girt_load_filter, dof=3, total_load=-1000.0),  # 100 kg down
+    LoadBC("left_girt_load", left_girt_load_filter, dof=1, total_load=500.0),      # 50kg sideways +X
 ]
 
 print(f"Additional loads:")
-print(f"  - Right girt at Y={right_girt_y_quarter:.1f}mm: 500 kg downward")
-print(f"  - Left girt at Y={left_girt_y_threequarter:.1f}mm: 100 kg sideways (+X)")
+print(f"  - Right girt at Y={right_girt_y_quarter:.1f}mm: 100 kg downward")
+print(f"  - Left girt at Y={left_girt_y_threequarter:.1f}mm: 50 kg sideways (+X)")
+print(f"  - Self-weight: automatic")
 print()
 
 result = frame.analyze(
-    load=-10000.0,  # 10 kN downward (applied to center beam)
     additional_loads=additional_loads,
     output_dir=output_dir,
     mesh_size=70.0,        # Coarser default mesh
@@ -254,7 +252,7 @@ if result.success:
     show_fea_results(
         mesh_file=str(output_dir / "mesh.inp"),
         frd_file=str(output_dir / "analysis.frd"),
-        scale=5.0,
+        scale=60.0,
         original_shapes=original_shapes,
         deformed_color="red",
         original_alpha=0.3,

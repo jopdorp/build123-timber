@@ -5,7 +5,7 @@ from pathlib import Path
 from ocp_vscode import reset_show
 
 from timber_joints.alignment import build_complete_bent
-from timber_joints.fea import TimberFrame, show_fea_results
+from timber_joints.fea import TimberFrame, show_fea_results, LoadBC
 
 reset_show()
 
@@ -20,21 +20,40 @@ left_post, right_post, beam, _ = build_complete_bent(
     post_top_extension=300,
 )
 
+# Frame dimensions for reference
+BEAM_LENGTH = 5000  # mm
+
 # Create frame and add members
 frame = TimberFrame()
 frame.add_member("left_post", left_post)
 frame.add_member("right_post", right_post)
 frame.add_member("beam", beam)
 
-# Analyze - that's it!
+# Add 1 tonne load at beam midspan
+beam_bbox = beam.bounding_box()
+mid_x = (beam_bbox.min.X + beam_bbox.max.X) / 2
+top_z = beam_bbox.max.Z
+
+def main_load_filter(nid, x, y, z, part, mesh):
+    return (part == "beam" and 
+            abs(x - mid_x) < 70.0 and 
+            abs(z - top_z) < 35.0)
+
+main_load = LoadBC("main_load", main_load_filter, dof=3, total_load=-9810.0)  # 1 tonne down
+
+# Analyze - self-weight is automatic!
 output_dir = Path(__file__).parent / "fea_pipeline_test_output"
 
 print("=" * 60)
 print("BENT FRAME FEA ANALYSIS")
 print("=" * 60)
+print(f"Loads:")
+print(f"  - Main load: 1000 kg (1 tonne) at beam midspan")
+print(f"  - Self-weight: automatic")
+print()
 
 result = frame.analyze(
-    load=-10000.0,  # 10 kN downward
+    additional_loads=[main_load],
     output_dir=output_dir,
 )
 
@@ -50,7 +69,7 @@ if result.success:
     print(f"  Max Z: {result.fea_results.max_uz:.4f} mm")
     
     # Serviceability check
-    limit = 5000 / 300  # L/300
+    limit = BEAM_LENGTH / 300  # L/300
     status = "PASS ✓" if abs(result.fea_results.max_uz) < limit else "FAIL ✗"
     print(f"  Limit (L/300): {limit:.2f} mm")
     print(f"  Status: {status}")
