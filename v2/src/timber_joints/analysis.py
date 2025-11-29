@@ -590,3 +590,240 @@ def print_analysis_summary(results: dict[str, AnalysisResult]):
             print(f"{name}: max disp = {result.max_displacement:.4f} mm")
         else:
             print(f"{name}: FAILED - {result.error}")
+
+
+# =============================================================================
+# Multi-Step Friction Contact Utilities
+# =============================================================================
+
+
+def generate_friction_contact_steps(
+    load_nodes: List[int],
+    load_magnitude: float,
+    n_load_steps: int = 10,
+    friction_coeff: float = 0.4,
+    stick_slope: float = 2000.0,
+    use_stabilize: bool = False,
+    stabilize_coeff: float = 0.05,
+) -> List[str]:
+    """
+    Generate CalculiX input lines for multi-step friction contact loading.
+    
+    This implements the industry-standard approach for friction contact:
+    1. Step 0: Close contact gaps (no load, no friction)
+    2. Step 1: Apply first load increment (no friction yet)  
+    3. Steps 2-N: Apply remaining load increments with friction active
+    
+    This sequence allows contact to establish before friction engages,
+    avoiding the stick-slip oscillation that causes non-convergence.
+    
+    Args:
+        load_nodes: List of node IDs to apply load to
+        load_magnitude: Total load in N (will be distributed across nodes)
+        n_load_steps: Number of load increments (default 10 = 10% each)
+        friction_coeff: Coefficient of friction μ (default 0.4 for wood)
+        stick_slope: Stick slope for penalty friction (default 2000)
+        use_stabilize: Use *FRICTION, STABILIZE for additional stability
+        stabilize_coeff: Stabilization coefficient (default 0.05)
+    
+    Returns:
+        List of CalculiX input lines for all analysis steps
+    """
+    lines = []
+    load_per_node = load_magnitude / len(load_nodes) if load_nodes else 0
+    
+    # Calculate cumulative load fractions
+    fractions = [(i + 1) / n_load_steps for i in range(n_load_steps)]
+    
+    # Step 0: Contact seating only (no load, no friction)
+    lines.extend([
+        "",
+        "** ============================================================",
+        "** STEP 0: Contact seating (close gaps, no load, no friction)",
+        "** ============================================================",
+        "*STEP, NLGEOM, INC=40",
+        "*STATIC",
+        "0.1, 1.0, 1e-6, 0.2",
+        "",
+        "** No loads - just establish contact",
+        "",
+        "*NODE FILE",
+        "U",
+        "*END STEP",
+    ])
+    
+    # Step 1: First load increment WITHOUT friction
+    # This allows contact to settle under pressure before friction activates
+    lines.extend([
+        "",
+        "** ============================================================",
+        f"** STEP 1: Load {fractions[0]*100:.0f}% (NO friction yet)",
+        "** ============================================================",
+        "*STEP, NLGEOM, INC=50",
+        "*STATIC",
+        "0.05, 1.0, 1e-6, 0.1",
+        "",
+        "*CLOAD",
+    ])
+    
+    for node in load_nodes:
+        lines.append(f"{node}, 3, {-load_per_node * fractions[0]:.6f}")
+    
+    lines.extend([
+        "",
+        "*NODE FILE",
+        "U, RF",
+        "*EL FILE",
+        "S, E",
+        "*CONTACT FILE",
+        "CDIS, CSTR",
+        "*END STEP",
+    ])
+    
+    # Steps 2+: Remaining load increments WITH friction
+    for step_num, fraction in enumerate(fractions[1:], start=2):
+        lines.extend([
+            "",
+            "** ============================================================",
+            f"** STEP {step_num}: Load {fraction*100:.0f}% WITH friction",
+            "** ============================================================",
+            "*STEP, NLGEOM, INC=60",
+            "*STATIC",
+            "0.05, 1.0, 1e-6, 0.1",
+            "",
+        ])
+        
+        # Enable friction
+        if use_stabilize:
+            lines.append(f"*FRICTION, STABILIZE={stabilize_coeff}")
+        else:
+            lines.append("*FRICTION")
+        lines.append(f"{friction_coeff}, {stick_slope}")
+        
+        lines.extend([
+            "",
+            "*CLOAD",
+        ])
+        
+        for node in load_nodes:
+            lines.append(f"{node}, 3, {-load_per_node * fraction:.6f}")
+        
+        lines.extend([
+            "",
+            "*NODE FILE",
+            "U, RF",
+            "*EL FILE", 
+            "S, E",
+            "*CONTACT FILE",
+            "CDIS, CSTR",
+            "*END STEP",
+        ])
+    
+    return lines
+
+
+def generate_calculix_contact_input(
+    mesh_file: str,
+    material: "TimberMaterial",
+    fixed_nodes_left: List[int],
+    fixed_nodes_right: List[int],
+    load_nodes: List[int],
+    load_magnitude: float,
+    contact_pairs: List[dict],
+    margin_gap: float = 1.0,
+    n_load_steps: int = 10,
+    friction_coeff: float = 0.4,
+    use_stabilize: bool = False,
+) -> str:
+    """
+    Generate complete CalculiX input file content for friction contact analysis.
+    
+    This creates a multi-step analysis that:
+    1. Establishes contact (no load, no friction)
+    2. Applies first load increment (no friction)
+    3. Incrementally increases load with friction active
+    
+    Args:
+        mesh_file: Path to mesh.inp file (will use *INCLUDE)
+        material: TimberMaterial with orthotropic properties
+        fixed_nodes_left: Node IDs fixed at left support
+        fixed_nodes_right: Node IDs fixed at right support
+        load_nodes: Node IDs for load application
+        load_magnitude: Total load in N
+        contact_pairs: List of dicts with 'slave' and 'master' surface names
+        margin_gap: Initial contact gap in mm
+        n_load_steps: Number of load increments
+        friction_coeff: Coefficient of friction μ
+        use_stabilize: Use *FRICTION, STABILIZE
+    
+    Returns:
+        Complete CalculiX input file content as string
+    """
+    lines = [
+        "** CalculiX Friction Contact Analysis (Multi-Step Method)",
+        "** Generated by timber_joints.analysis",
+        "**",
+        "** Strategy: Contact seating → First load (no friction) → Load with friction",
+        "** This avoids stick-slip oscillation during initial contact establishment",
+        "**",
+        "",
+        f"*INCLUDE, INPUT={Path(mesh_file).name}",
+        "",
+        f"*MATERIAL, NAME={material.name}",
+        "*ELASTIC, TYPE=ENGINEERING CONSTANTS",
+        f"{material.E_L}, {material.E_R}, {material.E_T}, "
+        f"{material.nu_LR}, {material.nu_LT}, {material.nu_RT}, "
+        f"{material.G_LR}, {material.G_LT},",
+        f"{material.G_RT}, 0.0",
+        "*DENSITY",
+        f"{material.density * 1e-9:.6e}",
+        "",
+        "*SOLID SECTION, ELSET=TIMBER, MATERIAL=" + material.name,
+        "",
+        "** Surface interaction - LINEAR penalty contact with friction",
+        "*SURFACE INTERACTION, NAME=WOOD_CONTACT",
+        "*SURFACE BEHAVIOR, PRESSURE-OVERCLOSURE=LINEAR",
+        f"1e3, 0.0, {margin_gap}",  # slope K, sigma_inf=0, c0 = margin_gap
+        "",
+    ]
+    
+    # Contact pairs
+    for i, pair in enumerate(contact_pairs):
+        lines.extend([
+            f"** Contact pair {i+1}: {pair.get('name', f'joint_{i+1}')}",
+            f"*CONTACT PAIR, INTERACTION=WOOD_CONTACT, TYPE=NODE TO SURFACE, ADJUST={margin_gap + 1}",
+            f"{pair['slave']}, {pair['master']}",
+            "",
+        ])
+    
+    # Convergence controls
+    lines.extend([
+        "** Relaxed convergence for contact problems",
+        "*CONTROLS, PARAMETERS=TIME INCREMENTATION",
+        "20,30,9,200,10,4,,5",
+        "*CONTROLS, PARAMETERS=FIELD, FIELD=DISPLACEMENT",
+        "0.25, 0.5, 1e-5, ,0.02, 1e-5",
+        "*CONTROLS, PARAMETERS=CONTACT",
+        "0.001, 0.1, 100, 200",
+        "",
+        "** Boundary Conditions - Posts fixed at foundation",
+        "*BOUNDARY",
+    ])
+    
+    for node in fixed_nodes_left:
+        lines.append(f"{node}, 1, 3, 0.0")
+    
+    for node in fixed_nodes_right:
+        lines.append(f"{node}, 1, 3, 0.0")
+    
+    # Add multi-step friction loading
+    step_lines = generate_friction_contact_steps(
+        load_nodes=load_nodes,
+        load_magnitude=load_magnitude,
+        n_load_steps=n_load_steps,
+        friction_coeff=friction_coeff,
+        use_stabilize=use_stabilize,
+    )
+    lines.extend(step_lines)
+    
+    return '\n'.join(lines)

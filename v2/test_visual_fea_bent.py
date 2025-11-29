@@ -12,6 +12,7 @@ from timber_joints.analysis import (
     find_mesh_contact_faces,
     build_mesh_faces_compound,
     TimberMaterial,
+    generate_calculix_contact_input,
 )
 from build123d import Location
 
@@ -357,16 +358,25 @@ with open(mesh_file, 'w') as f:
 
 print(f"\nMesh file: {mesh_file}")
 
-# Write CalculiX input with contact pairs and friction
-load_magnitude = 10000.0  # 10 kN = ~1 tonne
+# Write CalculiX input with MULTI-STEP approach:
+# Step 1: Frictionless contact to establish contact state
+# Steps 2-N: Add friction and incrementally increase load
+
+load_magnitude = 10000.0  # 10 kN = ~1 tonne total
 load_per_node = load_magnitude / len(load_nodes) if load_nodes else 0
 
-# Friction coefficient for wood-on-wood
-friction_coeff = 0.4  # Typical for wood
+# Friction coefficient for wood-on-wood (target value)
+friction_coeff = 0.2  # Moderate friction for realistic wood contact
+stick_slope = 2000.0  # Standard penalty stiffness
+
+# Multi-step loading with more gradual increments at high load
+num_friction_steps = 15  # More steps for finer load increments
+use_surface_to_surface = True  # Surface-to-surface contact for smoother friction
 
 ccx_lines = [
-    "** CalculiX Complete Bent Frame Analysis with Friction Contact",
-    "** Three separate parts with friction at mortise-tenon joints",
+    "** CalculiX Complete Bent Frame Analysis - MULTI-STEP FRICTION",
+    "** Step 1: Frictionless contact with minimal load (establish contact)",
+    "** Steps 2+: Friction enabled, incrementally increase load",
     "**",
     "",
     f"*INCLUDE, INPUT=mesh.inp",
@@ -382,48 +392,37 @@ ccx_lines = [
     "",
     "*SOLID SECTION, ELSET=TIMBER, MATERIAL=" + material.name,
     "",
-    "** Surface interaction definition - frictionless contact",
-    "** (Friction causes convergence issues, frictionless is conservative)",
-    "*SURFACE INTERACTION, NAME=WOOD_CONTACT",
-    "** Using LINEAR penalty contact",
+    "** Surface interaction - FRICTIONLESS for step 1",
+    "*SURFACE INTERACTION, NAME=FRICTIONLESS_CONTACT",
     "*SURFACE BEHAVIOR, PRESSURE-OVERCLOSURE=LINEAR",
     f"1e3, 0.0, {margin_gap}",  # slope K, sigma_inf=0, c0 = margin_gap
     "",
+    "** Surface interaction - WITH FRICTION for steps 2+",
+    "*SURFACE INTERACTION, NAME=FRICTION_CONTACT",
+    "*SURFACE BEHAVIOR, PRESSURE-OVERCLOSURE=LINEAR",
+    f"1e3, 0.0, {margin_gap}",
+    "*FRICTION",
+    f"{friction_coeff}, {stick_slope}",
+    "",
 ]
 
-# Contact pairs for joints
-# In CalculiX contact: slave surface, master surface
-# Smaller/finer mesh should be slave, larger/coarser should be master
-# For mortise-tenon: beam tenon (slave) contacts post mortise (master)
-# ADJUST closes the initial gap automatically
-
+# Contact pairs for joints - use frictionless initially
+contact_type = "SURFACE TO SURFACE" if use_surface_to_surface else "NODE TO SURFACE"
 if left_beam_faces and left_post_faces:
     ccx_lines.extend([
-        "** Left joint contact pair (beam tenon to post mortise)",
-        f"*CONTACT PAIR, INTERACTION=WOOD_CONTACT, TYPE=NODE TO SURFACE, ADJUST={margin_gap + 1}",
+        "** Left joint contact pair",
+        f"*CONTACT PAIR, INTERACTION=FRICTIONLESS_CONTACT, TYPE={contact_type}, ADJUST={margin_gap + 1}",
         "LEFT_BEAM_SURF, LEFT_POST_SURF",
         "",
     ])
 
 if right_beam_faces and right_post_faces:
     ccx_lines.extend([
-        "** Right joint contact pair (beam tenon to post mortise)",
-        f"*CONTACT PAIR, INTERACTION=WOOD_CONTACT, TYPE=NODE TO SURFACE, ADJUST={margin_gap + 1}",
+        "** Right joint contact pair", 
+        f"*CONTACT PAIR, INTERACTION=FRICTIONLESS_CONTACT, TYPE={contact_type}, ADJUST={margin_gap + 1}",
         "RIGHT_BEAM_SURF, RIGHT_POST_SURF",
         "",
     ])
-
-# Relaxed convergence controls for contact
-ccx_lines.extend([
-    "** Relaxed convergence for contact problems",
-    "*CONTROLS, PARAMETERS=TIME INCREMENTATION",
-    "20,30,9,200,10,4,,5",  # More iterations, larger cutbacks allowed
-    "*CONTROLS, PARAMETERS=FIELD, FIELD=DISPLACEMENT",
-    "0.25, 0.5, 1e-5, ,0.02, 1e-5",  # Relaxed convergence
-    "*CONTROLS, PARAMETERS=CONTACT",
-    "0.001, 0.1, 100, 200",  # delcon, alea, kscalemax (int>=1), itf2f (int>=1)
-    "",
-])
 
 ccx_lines.extend([
     "** Boundary Conditions - Posts fixed at foundation",
@@ -436,32 +435,83 @@ for node in fixed_nodes_left:
 for node in fixed_nodes_right:
     ccx_lines.append(f"{node}, 1, 3, 0.0")
 
+# Step 1: Frictionless contact with small load to establish contact
+initial_load_fraction = 0.05  # 5% of total load
 ccx_lines.extend([
     "",
-    "** Analysis step - nonlinear static for contact",
+    "** ============================================================",
+    "** STEP 1: Establish contact (frictionless, small load)",
+    "** ============================================================",
     "*STEP, NLGEOM, INC=100",
     "*STATIC",
-    "0.01, 1.0, 1e-6, 0.1",  # Smaller initial inc, more gradual loading
+    "0.1, 1.0, 1e-8, 0.5",
     "",
-    "** Load at beam midspan",
+    "** Small initial load to press surfaces into contact",
     "*CLOAD",
 ])
 
 for node in load_nodes:
-    ccx_lines.append(f"{node}, 3, {-load_per_node:.6f}")
+    ccx_lines.append(f"{node}, 3, {-load_per_node * initial_load_fraction:.6f}")
 
 ccx_lines.extend([
     "",
-    "** Output requests",
     "*NODE FILE",
-    "U, RF",  # Displacements and reaction forces
-    "*EL FILE",
-    "S, E",  # Stresses and strains
+    "U, RF",
+    "*EL FILE", 
+    "S, E",
     "*CONTACT FILE",
-    "CDIS, CSTR",  # Contact distance and contact stress (PCON only for dynamics)
+    "CDIS, CSTR",
     "",
     "*END STEP",
 ])
+
+# Steps 2+: Switch to friction and incrementally increase load
+# Use smaller steps and CONTROLS for better convergence
+load_fractions = np.linspace(initial_load_fraction, 1.0, num_friction_steps + 1)[1:]  # Skip first (already done)
+
+for step_num, load_frac in enumerate(load_fractions, start=2):
+    prev_frac = load_fractions[step_num - 3] if step_num > 2 else initial_load_fraction
+    
+    ccx_lines.extend([
+        "",
+        f"** ============================================================",
+        f"** STEP {step_num}: Friction enabled, load = {load_frac*100:.0f}%",
+        f"** ============================================================",
+        "*STEP, NLGEOM, INC=500",
+        "*STATIC",
+        "0.02, 1.0, 1e-10, 0.1",  # Very small increments for friction
+        "",
+        "** Line search and convergence controls for friction",
+        "*CONTROLS, PARAMETERS=LINE SEARCH",
+        "6, 2.0, 0.5, 0.85, 0.0",
+        "*CONTROLS, PARAMETERS=FIELD",
+        "0.01, 4.0, 0.01, 1e5",  # Tighter convergence
+        "",
+        "** Change to friction contact",
+        "*CHANGE SURFACE BEHAVIOR, INTERACTION=FRICTIONLESS_CONTACT",
+        "*SURFACE BEHAVIOR, PRESSURE-OVERCLOSURE=LINEAR",
+        f"1e3, 0.0, {margin_gap}",
+        "*FRICTION",
+        f"{friction_coeff}, {stick_slope}",
+        "",
+        "** Increase load",
+        "*CLOAD",
+    ])
+    
+    for node in load_nodes:
+        ccx_lines.append(f"{node}, 3, {-load_per_node * load_frac:.6f}")
+    
+    ccx_lines.extend([
+        "",
+        "*NODE FILE",
+        "U, RF",
+        "*EL FILE",
+        "S, E", 
+        "*CONTACT FILE",
+        "CDIS, CSTR",
+        "",
+        "*END STEP",
+    ])
 
 ccx_file = str(output_dir / "analysis.inp")
 with open(ccx_file, 'w') as f:
@@ -469,7 +519,10 @@ with open(ccx_file, 'w') as f:
 
 print(f"\nCalculiX input: {ccx_file}")
 print(f"Load: {load_magnitude} N at beam midspan")
-print(f"Joint model: Contact pairs (frictionless - friction causes convergence issues)")
+print(f"Joint model: Multi-step friction with S2S contact")
+print(f"  Step 1: Frictionless, {initial_load_fraction*100:.0f}% load (establish contact)")
+print(f"  Steps 2-{num_friction_steps+1}: Friction μ={friction_coeff}, STATIC")
+print(f"  Contact type: {contact_type}")
 print(f"Contact surfaces: {len(left_beam_faces) + len(right_beam_faces)} beam faces, "
       f"{len(left_post_faces) + len(right_post_faces)} post faces")
 
@@ -637,11 +690,10 @@ print(f"  Joints: Shouldered mortise-and-tenon with friction contact")
 print(f"  Material: {material.name}")
 print(f"  Load: {load_magnitude} N at beam midspan")
 print(f"  Boundary: Posts fixed at foundation (Z=0)")
-print(f"\nJoint Model:")
-print(f"  - Parts meshed separately (3 bodies)")
-print(f"  - Contact pairs (frictionless contact)")
+print(f"\nJoint Model (Multi-Step Friction):")
+print(f"  - Step 1: Frictionless contact, {initial_load_fraction*100:.0f}% load")
+print(f"  - Steps 2-{num_friction_steps+1}: Friction μ={friction_coeff}, incremental load")
 print(f"  - Contact surfaces: beam tenon faces <-> post mortise faces")
-print(f"  - Surface-to-surface contact formulation")
 
 if results:
     print(f"\nResults:")
