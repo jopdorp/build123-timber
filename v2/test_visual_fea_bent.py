@@ -494,7 +494,7 @@ load_per_node = load_magnitude / len(load_nodes) if load_nodes else 0
 
 # Friction parameters - realistic wood-on-wood values
 friction_coeff = 0.35  # Wood-on-wood static friction (typical range 0.25-0.5)
-stick_slope = 1000.0  # Tangential penalty ≈ normal penalty for balanced behavior
+stick_slope = 300.0  # Tangential penalty ≈ normal penalty (300 MPa/mm)
 stabilize = 0.01  # Friction stabilization (damping for convergence)
 
 ccx_lines = [
@@ -518,7 +518,7 @@ ccx_lines = [
     "** Frictional surface interaction with stabilization",
     "*SURFACE INTERACTION, NAME=WOOD_CONTACT",
     "*SURFACE BEHAVIOR, PRESSURE-OVERCLOSURE=LINEAR",
-    f"1e3, 0.0, {margin_gap}",
+    f"300.0, 0.0, {margin_gap}",  # Penalty ~E_perp for realistic wood contact
     f"*FRICTION, STABILIZE={stabilize}",
     f"{friction_coeff}, {stick_slope}",
     "",
