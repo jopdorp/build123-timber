@@ -1,7 +1,7 @@
 # %%
 # FEA Analysis of Complete Bent with Friction Contact
 #
-# Uses find_joint_contact_surfaces from analysis.py to extract contact regions
+# Uses pure mesh-based contact detection (no CAD geometry needed for contacts)
 
 from ocp_vscode import show_object, reset_show
 from pathlib import Path
@@ -9,8 +9,7 @@ from pathlib import Path
 from timber_joints.alignment import build_complete_bent
 from timber_joints.analysis import (
     expand_shape_by_margin,
-    find_joint_contact_surfaces,
-    find_mesh_faces_on_surface,
+    find_mesh_contact_faces,
     TimberMaterial,
 )
 from build123d import Location
@@ -27,27 +26,14 @@ left_post, right_post, beam_positioned, _ = build_complete_bent(
     post_top_extension=300,
 )
 
-# Scale beam down slightly to create contact gap (use actual beam shape, not a box)
+# Scale beam down slightly to create contact gap
 beam_with_gap = expand_shape_by_margin(beam_positioned, -1.0)
 
-# Extract contact surfaces (margin in mm to expand bbox on each side)
-contact_margin = 2
-left_tenon, left_mortise = find_joint_contact_surfaces(beam_with_gap, left_post, contact_margin)
-right_tenon, right_mortise = find_joint_contact_surfaces(beam_with_gap, right_post, contact_margin)
-
-# Show geometry with contact surfaces
+# Show geometry
 reset_show()
 show_object(left_post, name="Left Post", options={"color": "sienna", "alpha": 0.3})
 show_object(right_post, name="Right Post", options={"color": "sienna", "alpha": 0.3})
 show_object(beam_with_gap, name="Beam", options={"color": "burlywood", "alpha": 0.3})
-show_object(left_tenon, name="Left Tenon", options={"color": "red"})
-show_object(right_tenon, name="Right Tenon", options={"color": "red"})
-show_object(left_mortise, name="Left Mortise", options={"color": "blue"})
-show_object(right_mortise, name="Right Mortise", options={"color": "blue"})
-# show_object(left_tenon.move(Location((0,0,200))), name="Left Tenon", options={"color": "red"})
-# show_object(right_tenon.move(Location((0,0,200))), name="Right Tenon", options={"color": "red"})
-# show_object(left_mortise.move(Location((0,200,200))), name="Left Mortise", options={"color": "blue"})
-# show_object(right_mortise.move(Location((0,200,200))), name="Right Mortise", options={"color": "blue"})
 
 # %%
 # Mesh parts and run FEA
@@ -175,7 +161,7 @@ for i, elem in enumerate(beam_elements):
     beam_elem_ids.append(elem_id)
     all_elements.append((elem_id, [n + beam_node_offset for n in elem]))
 
-# Find boundary nodes and contact surfaces
+# Find boundary nodes for BCs and loading
 tol = 2.0
 left_post_bottom_z = left_post_bbox.min.Z
 right_post_bottom_z = right_post_bbox.min.Z
@@ -183,16 +169,6 @@ right_post_bottom_z = right_post_bbox.min.Z
 fixed_nodes_left = []
 fixed_nodes_right = []
 load_nodes = []
-
-left_joint_beam_nodes = []
-left_joint_post_nodes = []
-right_joint_beam_nodes = []
-right_joint_post_nodes = []
-
-left_joint_x_min = left_post_bbox.min.X - tol
-left_joint_x_max = left_post_bbox.max.X + tol
-right_joint_x_min = right_post_bbox.min.X - tol
-right_joint_x_max = right_post_bbox.max.X + tol
 
 # Beam midspan for load
 beam_mid_x = (beam_bbox.min.X + beam_bbox.max.X) / 2
@@ -220,43 +196,31 @@ for nid, (x, y, z) in all_nodes.items():
           beam_bbox.min.Y - tol <= y <= beam_bbox.max.Y + tol and
           nid > beam_node_offset):  # Beam nodes only
         load_nodes.append(nid)
-    
-    # Left joint contact surfaces
-    if (left_joint_x_min <= x <= left_joint_x_max and
-        beam_bbox.min.Z - tol <= z <= beam_bbox.max.Z + tol):
-        if nid > beam_node_offset:  # Beam node
-            left_joint_beam_nodes.append(nid)
-        elif nid <= right_node_offset:  # Left post node
-            left_joint_post_nodes.append(nid)
-    
-    # Right joint contact surfaces
-    if (right_joint_x_min <= x <= right_joint_x_max and
-        beam_bbox.min.Z - tol <= z <= beam_bbox.max.Z + tol):
-        if nid > beam_node_offset:  # Beam node
-            right_joint_beam_nodes.append(nid)
-        elif right_node_offset < nid <= beam_node_offset:  # Right post node
-            right_joint_post_nodes.append(nid)
 
 print(f"\nBoundary conditions:")
 print(f"  Left post fixed nodes: {len(fixed_nodes_left)}")
 print(f"  Right post fixed nodes: {len(fixed_nodes_right)}")
 print(f"  Load nodes: {len(load_nodes)}")
-print(f"\nContact surfaces:")
-print(f"  Left joint - beam nodes: {len(left_joint_beam_nodes)}, post nodes: {len(left_joint_post_nodes)}")
-print(f"  Right joint - beam nodes: {len(right_joint_beam_nodes)}, post nodes: {len(right_joint_post_nodes)}")
 
-# Create element lists with proper structure
+# Create element lists with proper structure (with offsets applied)
 left_post_elements = [(eid, nodes) for eid, nodes in all_elements if eid in left_elem_ids]
 right_post_elements = [(eid, nodes) for eid, nodes in all_elements if eid in right_elem_ids]
 beam_elements_list = [(eid, nodes) for eid, nodes in all_elements if eid in beam_elem_ids]
 
-# Find mesh faces that lie on the CAD contact surfaces
-print("\nFinding mesh faces on contact surfaces...")
-left_beam_faces = find_mesh_faces_on_surface(beam_elements_list, all_nodes, left_tenon)
-left_post_faces = find_mesh_faces_on_surface(left_post_elements, all_nodes, left_mortise)
+# Find contact faces using pure mesh-based approach (no CAD needed!)
+# Uses bbox intersection of the two meshes to find where they meet
+print("\nFinding contact faces from mesh bbox intersection...")
+left_beam_faces, left_post_faces = find_mesh_contact_faces(
+    beam_elements_list, all_nodes,
+    left_post_elements, all_nodes,
+    margin=mesh_size  # Use mesh size as margin to capture all contact faces
+)
 
-right_beam_faces = find_mesh_faces_on_surface(beam_elements_list, all_nodes, right_tenon)
-right_post_faces = find_mesh_faces_on_surface(right_post_elements, all_nodes, right_mortise)
+right_beam_faces, right_post_faces = find_mesh_contact_faces(
+    beam_elements_list, all_nodes,
+    right_post_elements, all_nodes,
+    margin=mesh_size
+)
 
 print(f"\nContact surfaces (element faces):")
 print(f"  Left joint - beam faces: {len(left_beam_faces)}, post faces: {len(left_post_faces)}")
