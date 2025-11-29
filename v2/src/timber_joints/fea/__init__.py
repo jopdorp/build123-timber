@@ -4,6 +4,7 @@ This module provides utilities for:
 - Mesh generation with contact region refinement
 - CalculiX input generation and solver interface
 - Results post-processing and visualization
+- Generic assembly analysis pipeline
 
 Future extensions:
 - EasyFEA integration for moisture/shrinkage analysis
@@ -37,12 +38,6 @@ from .calculix import (
     POST_VERTICAL_Z,
 )
 
-from .pipeline import (
-    BentFrameConfig,
-    BentFrameAnalysisResult,
-    analyze_bent_frame,
-)
-
 from .visualization import (
     read_mesh_elements,
     get_outer_faces,
@@ -50,6 +45,18 @@ from .visualization import (
     apply_displacements,
     build_deformed_mesh,
     show_fea_results,
+)
+
+from .assembly import (
+    FEAPart,
+    ContactPair,
+    FixedBC,
+    LoadBC,
+    AssemblyConfig,
+    AssemblyResult,
+    analyze_assembly,
+    nodes_at_location,
+    nodes_in_bbox,
 )
 
 __all__ = [
@@ -76,10 +83,6 @@ __all__ = [
     "analyze_results",
     "BEAM_HORIZONTAL_X",
     "POST_VERTICAL_Z",
-    # Pipeline
-    "BentFrameConfig",
-    "BentFrameAnalysisResult",
-    "analyze_bent_frame",
     # Visualization
     "read_mesh_elements",
     "get_outer_faces",
@@ -87,4 +90,14 @@ __all__ = [
     "apply_displacements",
     "build_deformed_mesh",
     "show_fea_results",
+    # Generic Assembly API
+    "FEAPart",
+    "ContactPair",
+    "FixedBC",
+    "LoadBC",
+    "AssemblyConfig",
+    "AssemblyResult",
+    "analyze_assembly",
+    "nodes_at_location",
+    "nodes_in_bbox",
 ]
