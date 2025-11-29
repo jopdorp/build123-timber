@@ -1,7 +1,7 @@
 """Shouldered tenon - tenon with angled shoulder (no mortise/housing)."""
 
 from dataclasses import dataclass
-from build123d import Part, Polyline, make_face, extrude
+from build123d import Part, Polyline, make_face, extrude, Axis, Location
 from timber_joints.beam import Beam
 from timber_joints.utils import create_tenon_cut
 
@@ -88,7 +88,13 @@ class ShoulderedTenon:
         
         # Create the shoulder wedge (material to keep, not cut)
         shoulder_wedge = self._create_shoulder_wedge(x_deep, x_flush)
-        
+        if self.at_start:
+            # Rotate 180° around Z to flip the shoulder angle direction
+            shoulder_wedge = shoulder_wedge.rotate(Axis.Z, 180)
+            # After rotation, wedge is at negative X and Y - move it back to align with tenon waste
+            bbox = shoulder_wedge.bounding_box()
+            tenon_waste_bbox = tenon_waste.bounding_box()
+            shoulder_wedge = shoulder_wedge.move(Location((tenon_waste_bbox.max.X - bbox.max.X, -bbox.min.Y, 0)))
         # Final cut = tenon waste - shoulder wedge (don't cut the wedge area)
         final_cut = tenon_waste - shoulder_wedge
         
