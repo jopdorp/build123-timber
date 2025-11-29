@@ -1,10 +1,11 @@
 """Dovetail insert - positive part only."""
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Union
 from build123d import Align, Box, Part, Location
 from timber_joints.beam import Beam
-from timber_joints.utils import create_dovetail_cut, calculate_dovetail_taper
+from timber_joints.utils import create_dovetail_cut, calculate_dovetail_taper, get_shape_dimensions
 
 
 @dataclass
@@ -15,7 +16,7 @@ class DovetailInsert:
     outward (narrower at the base/beam, wider at the tip/end).
     
     Parameters:
-    - beam: The beam to cut the dovetail on
+    - beam: The beam (Beam object or Part) to cut the dovetail on
     - dovetail_width: Width at the narrow end (base, where it meets beam)
     - dovetail_height: Height of the dovetail
     - dovetail_length: How far the dovetail extends from the beam end
@@ -23,21 +24,29 @@ class DovetailInsert:
     - at_start: If True, create at start (X=0); if False, at end (X=length)
     """
     
-    beam: Beam
+    beam: Union[Beam, Part]
     dovetail_width: float
     dovetail_height: float
     dovetail_length: float
     cone_angle: float = 10.0
     at_start: bool = False
+    
+    # Computed dimensions (from bounding box)
+    _input_shape: Part = field(init=False, repr=False)
+    _length: float = field(init=False, repr=False)
+    _width: float = field(init=False, repr=False)
+    _height: float = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Validate dovetail parameters."""
-        if self.dovetail_width <= 0 or self.dovetail_width > self.beam.width:
-            raise ValueError(f"dovetail_width must be between 0 and beam width ({self.beam.width})")
-        if self.dovetail_height <= 0 or self.dovetail_height > self.beam.height:
-            raise ValueError(f"dovetail_height must be between 0 and beam height ({self.beam.height})")
-        if self.dovetail_length <= 0 or self.dovetail_length > self.beam.length:
-            raise ValueError(f"dovetail_length must be between 0 and beam length ({self.beam.length})")
+        self._input_shape, self._length, self._width, self._height = get_shape_dimensions(self.beam)
+        
+        if self.dovetail_width <= 0 or self.dovetail_width > self._width:
+            raise ValueError(f"dovetail_width must be between 0 and beam width ({self._width})")
+        if self.dovetail_height <= 0 or self.dovetail_height > self._height:
+            raise ValueError(f"dovetail_height must be between 0 and beam height ({self._height})")
+        if self.dovetail_length <= 0 or self.dovetail_length > self._length:
+            raise ValueError(f"dovetail_length must be between 0 and beam length ({self._length})")
         if not 0 < self.cone_angle < 45:
             raise ValueError("cone_angle must be between 0 and 45 degrees")
 
@@ -54,19 +63,17 @@ class DovetailInsert:
     @property
     def shape(self) -> Part:
         """Create the dovetail insert by removing material around the tapered projection."""
-        result = self.beam.shape
-        
         # Determine position based on at_start
         if self.at_start:
             x_pos = 0
         else:
-            x_pos = self.beam.length - self.dovetail_length
+            x_pos = self._length - self.dovetail_length
         
         # Full end section (to be subtracted from)
         end_section = Box(
             self.dovetail_length,
-            self.beam.width,
-            self.beam.height,
+            self._width,
+            self._height,
             align=(Align.MIN, Align.MIN, Align.MIN)
         )
         end_section = end_section.move(Location((x_pos, 0, 0)))
@@ -77,15 +84,15 @@ class DovetailInsert:
             height=self.dovetail_height,
             length=self.dovetail_length,
             cone_angle=self.cone_angle,
-            y_center=self.beam.width / 2,
-            z_center=self.beam.height / 2,
+            y_center=self._width / 2,
+            z_center=self._height / 2,
         )
         dovetail_keep = dovetail_keep.move(Location((x_pos, 0, 0)))
         
         # Material to remove = end_section - dovetail_keep
         waste = end_section - dovetail_keep
         
-        return result - waste
+        return self._input_shape - waste
 
     def __repr__(self) -> str:
         position = "start" if self.at_start else "end"

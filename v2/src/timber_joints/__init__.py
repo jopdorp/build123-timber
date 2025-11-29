@@ -12,9 +12,39 @@ from timber_joints.alignment import (
     align_beam_in_post,
     make_post_vertical,
     create_receiving_cut,
+    position_for_blind_mortise,
+)
+from timber_joints.utils import get_shape_dimensions
+
+# Frame assembly
+from timber_joints.frame import (
+    Role,
+    Element,
+    Joint,
+    TimberFrame,
+    simple_bent,
+    bay_frame,
+)
+
+# Export adapters
+from timber_joints.export import (
+    export_frame_to_ifc,
+    show_frame,
+    export_beam_schedule,
+)
+
+# Analysis (optional - requires gmsh/CalculiX)
+from timber_joints.analysis import (
+    TimberMaterial,
+    AnalysisConfig,
+    AnalysisResult,
+    analyze_element,
+    analyze_frame,
+    print_analysis_summary,
 )
 
 __all__ = [
+    # Core
     "Beam",
     "LapJoint",
     "LapXSection",
@@ -22,8 +52,30 @@ __all__ = [
     "ShoulderedTenon",
     "DovetailInsert",
     "HalfDovetail",
+    # Utilities
+    "get_shape_dimensions",
+    # Alignment
     "align_beam_on_post",
     "align_beam_in_post",
     "make_post_vertical",
     "create_receiving_cut",
+    "position_for_blind_mortise",
+    # Frame assembly
+    "Role",
+    "Element",
+    "Joint",
+    "TimberFrame",
+    "simple_bent",
+    "bay_frame",
+    # Export
+    "export_frame_to_ifc",
+    "show_frame",
+    "export_beam_schedule",
+    # Analysis
+    "TimberMaterial",
+    "AnalysisConfig",
+    "AnalysisResult",
+    "analyze_element",
+    "analyze_frame",
+    "print_analysis_summary",
 ]

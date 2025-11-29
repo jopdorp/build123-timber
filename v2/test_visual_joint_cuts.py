@@ -3,6 +3,7 @@
 # Expected: Box at origin extending in +X, +Y, +Z
 
 from ocp_vscode import show_object
+from build123d import Location
 from timber_joints.beam import Beam
 
 beam = Beam(length=300, width=100, height=100)
@@ -11,7 +12,7 @@ bbox = beam.shape.bounding_box()
 print("=== 1. Plain Beam (reference) ===")
 print(f"BBox: X={bbox.min.X:.0f}-{bbox.max.X:.0f}, Y={bbox.min.Y:.0f}-{bbox.max.Y:.0f}, Z={bbox.min.Z:.0f}-{bbox.max.Z:.0f}")
 
-show_object(beam.shape, name="Plain Beam", options={"color": "orange"})
+show_object(beam.shape.move(Location((0, 0, 300))), name="Plain Beam", options={"color": "orange"})
 
 # %%
 # 2. Lap Joint - positive/inserting end
@@ -59,8 +60,8 @@ tenon = Tenon(
 print("=== 3. Basic Tenon ===")
 print(f"Tenon: {tenon.tenon_length}L × {tenon.tenon_width:.1f}W × {tenon.tenon_height:.1f}H")
 
-show_object(beam.shape, name="Beam blank", options={"color": "orange", "alpha": 0.3})
-show_object(tenon.shape.move(Location((400, 0, 0))), name="Tenon result", options={"color": "blue"})
+show_object(beam.shape.move(Location((0, -300, 0))), name="Beam blank", options={"color": "orange", "alpha": 0.3})
+show_object(tenon.shape.move(Location((400, -300, 0))), name="Tenon result", options={"color": "blue"})
 
 # %%
 # 4. Shouldered Tenon - tenon with angled/triangular shoulder
@@ -85,8 +86,8 @@ print("=== 4. Shouldered Tenon (angled) ===")
 print(f"Tenon: {shouldered.tenon_length}L × {shouldered.tenon_width:.1f}W × {shouldered.tenon_height:.1f}H")
 print(f"Shoulder depth: {shouldered.shoulder_depth}mm")
 
-show_object(beam.shape, name="Beam blank", options={"color": "orange", "alpha": 0.3})
-show_object(shouldered.shape.move(Location((400, 0, 0))), name="Shouldered Tenon result", options={"color": "purple"})
+show_object(beam.shape.move(Location((0, -600, 0))), name="Beam blank", options={"color": "orange", "alpha": 0.3})
+show_object(shouldered.shape.move(Location((400, -600, 0))), name="Shouldered Tenon result", options={"color": "purple"})
 
 # %%
 # 5. Dovetail Insert - tapered projection
@@ -114,8 +115,8 @@ print(f"Dovetail: {dovetail.dovetail_length}L × {dovetail.dovetail_height}H")
 print(f"Width: {narrow:.1f}mm (tip) → {wide:.1f}mm (base)")
 print(f"Cone angle: {dovetail.cone_angle}°")
 
-show_object(beam.shape, name="Beam blank", options={"color": "orange", "alpha": 0.3})
-show_object(dovetail.shape.move(Location((400, 0, 0))), name="Dovetail Insert result", options={"color": "red"})
+show_object(beam.shape.move(Location((0, 300, 0))), name="Beam blank", options={"color": "orange", "alpha": 0.3})
+show_object(dovetail.shape.move(Location((400, 300, 0))), name="Dovetail Insert result", options={"color": "red"})
 
 # %%
 # 6. Lap X-Section - lap cut at a cross-section point along the beam
@@ -139,8 +140,8 @@ print("=== 6. Lap X-Section (cross lap) ===")
 print(f"Cut depth: {lap_x.cut_depth}mm (from top)")
 print(f"Cut length: {lap_x.cut_length}mm at X={lap_x.x_position}mm")
 
-show_object(beam.shape, name="Beam blank", options={"color": "orange", "alpha": 0.3})
-show_object(lap_x.shape.move(Location((400, 0, 0))), name="Lap X-Section result", options={"color": "cyan"})
+show_object(beam.shape.move(Location((0, 600, 0))), name="Beam blank", options={"color": "orange", "alpha": 0.3})
+show_object(lap_x.shape.move(Location((400, 600, 0))), name="Lap X-Section result", options={"color": "cyan"})
 
 # %%
 # 7. Half-Dovetail - dovetail insert at top or bottom of beam
@@ -165,7 +166,7 @@ half_dt = HalfDovetail(
 print("=== 7. Half-Dovetail ===")
 print(f"Dovetail: {half_dt.dovetail_length}L × {half_dt.dovetail_height}H at top")
 
-show_object(beam.shape, name="Beam blank", options={"color": "orange", "alpha": 0.3})
-show_object(half_dt.shape.move(Location((400, 0, 0))), name="Half-Dovetail result", options={"color": "magenta"})
+show_object(beam.shape.move(Location((0, 900, 0))), name="Beam blank", options={"color": "orange", "alpha": 0.3})
+show_object(half_dt.shape.move(Location((400, 900, 0))), name="Half-Dovetail result", options={"color": "magenta"})
 
 # %%

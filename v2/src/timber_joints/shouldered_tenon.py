@@ -1,9 +1,10 @@
 """Shouldered tenon - tenon with angled shoulder (no mortise/housing)."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Union
 from build123d import Part, Polyline, make_face, extrude, Axis, Location
 from timber_joints.beam import Beam
-from timber_joints.utils import create_tenon_cut
+from timber_joints.utils import create_tenon_cut, get_shape_dimensions
 
 
 @dataclass
@@ -15,7 +16,7 @@ class ShoulderedTenon:
     cut back by shoulder_depth. This creates a wedge-shaped shoulder.
     
     Parameters:
-    - beam: The beam to cut the shouldered tenon on
+    - beam: The beam (Beam object or Part) to cut the shouldered tenon on
     - tenon_width: Width of the tenon projection (Y direction)
     - tenon_height: Height of the tenon projection (Z direction)
     - tenon_length: How far the tenon extends from the flush side of shoulder
@@ -23,27 +24,35 @@ class ShoulderedTenon:
     - at_start: If True, create at start (X=0); if False, at end (X=length)
     """
     
-    beam: Beam
+    beam: Union[Beam, Part]
     tenon_width: float
     tenon_height: float
     tenon_length: float
     shoulder_depth: float = 15.0
     at_start: bool = False
+    
+    # Computed dimensions (from bounding box)
+    _input_shape: Part = field(init=False, repr=False)
+    _length: float = field(init=False, repr=False)
+    _width: float = field(init=False, repr=False)
+    _height: float = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Validate shouldered tenon parameters."""
-        if self.tenon_width <= 0 or self.tenon_width > self.beam.width:
-            raise ValueError(f"tenon_width must be between 0 and beam width ({self.beam.width})")
-        if self.tenon_height <= 0 or self.tenon_height > self.beam.height:
-            raise ValueError(f"tenon_height must be between 0 and beam height ({self.beam.height})")
+        self._input_shape, self._length, self._width, self._height = get_shape_dimensions(self.beam)
+        
+        if self.tenon_width <= 0 or self.tenon_width > self._width:
+            raise ValueError(f"tenon_width must be between 0 and beam width ({self._width})")
+        if self.tenon_height <= 0 or self.tenon_height > self._height:
+            raise ValueError(f"tenon_height must be between 0 and beam height ({self._height})")
         if self.tenon_length <= 0:
             raise ValueError("tenon_length must be positive")
         if self.shoulder_depth <= 0:
             raise ValueError("shoulder_depth must be positive")
         
         total_length = self.tenon_length + self.shoulder_depth
-        if total_length > self.beam.length:
-            raise ValueError(f"Total length (tenon + shoulder = {total_length}) exceeds beam length ({self.beam.length})")
+        if total_length > self._length:
+            raise ValueError(f"Total length (tenon + shoulder = {total_length}) exceeds beam length ({self._length})")
 
     def _create_shoulder_wedge(self, x_deep: float, x_flush: float) -> Part:
         """Create the triangular wedge shape for the angled shoulder.
@@ -53,15 +62,15 @@ class ShoulderedTenon:
         # Triangular wedge: deep at bottom (Z=0), flush at top
         # Points ordered counter-clockwise when viewed from +Y
         profile_points = [
-            (x_deep, 0, 0),                     # Deep X, bottom Z
-            (x_deep, 0, self.beam.height),     # Deep X, top Z
-            (x_flush, 0, 0),                    # Flush X, bottom Z (angled edge)
+            (x_deep, 0, 0),                # Deep X, bottom Z
+            (x_deep, 0, self._height),     # Deep X, top Z
+            (x_flush, 0, 0),               # Flush X, bottom Z (angled edge)
         ]
         
         wire = Polyline(profile_points, close=True)
         face = make_face(wire)
         # Extrude in +Y direction across beam width
-        wedge = extrude(face, amount=self.beam.width)
+        wedge = extrude(face, amount=self._width)
         return Part(wedge.wrapped)
 
     @property
@@ -72,14 +81,14 @@ class ShoulderedTenon:
             x_deep = 0
             x_flush = self.shoulder_depth
         else:
-            x_flush = self.beam.length - self.tenon_length
+            x_flush = self._length - self.tenon_length
             x_deep = x_flush - self.shoulder_depth
         
         # Get the tenon cut (material around the tenon portion)
         tenon_waste = create_tenon_cut(
-            beam_length=self.beam.length,
-            beam_width=self.beam.width,
-            beam_height=self.beam.height,
+            beam_length=self._length,
+            beam_width=self._width,
+            beam_height=self._height,
             tenon_width=self.tenon_width,
             tenon_height=self.tenon_height,
             tenon_length=self.tenon_length + self.shoulder_depth,
@@ -98,7 +107,7 @@ class ShoulderedTenon:
         # Final cut = tenon waste - shoulder wedge (don't cut the wedge area)
         final_cut = tenon_waste - shoulder_wedge
         
-        return self.beam.shape - final_cut
+        return self._input_shape - final_cut
 
     def __repr__(self) -> str:
         position = "start" if self.at_start else "end"

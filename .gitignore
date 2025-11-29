@@ -92,3 +92,18 @@ Thumbs.db
 
 # Codacy AI rules
 .github/instructions/codacy.instructions.md
+
+# CalculiX output files
+*.12d
+*.cvg
+*.dat
+*.frd
+*.inp
+*.sta
+*.out
+
+# IFC files
+*.ifc
+
+# FEA results
+fea_results.png

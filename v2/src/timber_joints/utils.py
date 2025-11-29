@@ -1,7 +1,41 @@
 """Utility functions for timber joints."""
 
 import math
+from typing import Tuple
 from build123d import Align, Box, Part, Location, Polyline, make_face, extrude, loft, Sketch, Rectangle, Plane
+
+
+def get_shape_dimensions(shape) -> Tuple[Part, float, float, float]:
+    """Extract the Part shape and its dimensions from a Beam or Part.
+    
+    This utility function allows joint classes to accept either a Beam object
+    (with .shape attribute) or a raw Part. It uses bounding box to determine
+    dimensions, making it work with already-cut shapes.
+    
+    Args:
+        shape: Either a Beam object (with .shape and dimension attributes) 
+               or a Part object
+    
+    Returns:
+        Tuple of (part_shape, length, width, height) where:
+        - part_shape: The Part geometry
+        - length: X dimension (from bounding box)
+        - width: Y dimension (from bounding box)
+        - height: Z dimension (from bounding box)
+    """
+    # Get the underlying Part shape
+    if hasattr(shape, 'shape'):
+        part_shape = shape.shape
+    else:
+        part_shape = shape
+    
+    # Always use bounding box for dimensions - works for both pristine beams and cut shapes
+    bbox = part_shape.bounding_box()
+    length = bbox.max.X - bbox.min.X
+    width = bbox.max.Y - bbox.min.Y
+    height = bbox.max.Z - bbox.min.Z
+    
+    return part_shape, length, width, height
 
 
 def create_tenon_cut(
