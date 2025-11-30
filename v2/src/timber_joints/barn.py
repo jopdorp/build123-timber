@@ -48,9 +48,19 @@ class BarnConfig:
     # Girt parameters (None = use post_section)
     girt_section: Optional[float] = None
     
-    # Brace parameters (None = no braces)
-    brace_section: Optional[float] = 100
-    brace_distance_from_post: float = 500
+    # Bent brace parameters (None = no braces)
+    bent_brace_section: Optional[float] = 100
+    bent_brace_length: float = 707.1  # ~500mm horizontal at 45°
+    bent_brace_angle: float = 45.0
+    
+    # Girt brace parameters (None = use bent_brace values)
+    girt_brace_section: Optional[float] = None
+    girt_brace_length: Optional[float] = None
+    girt_brace_angle: Optional[float] = None
+    
+    # Legacy brace_section for backward compatibility
+    brace_section: Optional[float] = None
+    brace_length: Optional[float] = None
     
     # What to include
     include_girts: bool = True
@@ -60,6 +70,22 @@ class BarnConfig:
     def __post_init__(self):
         if self.girt_section is None:
             self.girt_section = self.post_section
+        
+        # Handle legacy brace_section parameter
+        if self.brace_section is not None:
+            if self.bent_brace_section == 100:  # Default value, override it
+                self.bent_brace_section = self.brace_section
+        if self.brace_length is not None:
+            if self.bent_brace_length == 707.1:  # Default value
+                self.bent_brace_length = self.brace_length
+        
+        # Girt braces default to bent brace values if not specified
+        if self.girt_brace_section is None:
+            self.girt_brace_section = self.bent_brace_section
+        if self.girt_brace_length is None:
+            self.girt_brace_length = self.bent_brace_length
+        if self.girt_brace_angle is None:
+            self.girt_brace_angle = self.bent_brace_angle
 
     @property
     def girt_length(self) -> float:
@@ -114,7 +140,7 @@ class BarnFrame:
         barn._build_bents()
         if config.include_girts:
             barn._build_girts()
-        if config.include_girt_braces and config.brace_section:
+        if config.include_girt_braces and config.girt_brace_section:
             barn._build_girt_braces()
         return barn
     
@@ -157,17 +183,19 @@ class BarnFrame:
             # Create braces if requested
             brace_left = None
             brace_right = None
-            if config.include_bent_braces and config.brace_section:
+            if config.include_bent_braces and config.bent_brace_section:
                 brace_left = create_brace_for_bent(
                     post=left_post, beam=beam,
-                    brace_section=config.brace_section,
-                    distance_from_post=config.brace_distance_from_post,
+                    brace_section=config.bent_brace_section,
+                    brace_length=config.bent_brace_length,
+                    angle=config.bent_brace_angle,
                     at_beam_start=True,
                 ).shape
                 brace_right = create_brace_for_bent(
                     post=right_post, beam=beam,
-                    brace_section=config.brace_section,
-                    distance_from_post=config.brace_distance_from_post,
+                    brace_section=config.bent_brace_section,
+                    brace_length=config.bent_brace_length,
+                    angle=config.bent_brace_angle,
                     at_beam_start=False,
                 ).shape
             
@@ -258,8 +286,9 @@ class BarnFrame:
         # Left side brace
         left_brace = create_brace_for_girt(
             post=bent.left_post, girt=self.left_girt,
-            brace_section=config.brace_section,
-            distance_from_post=config.brace_distance_from_post,
+            brace_section=config.girt_brace_section,
+            brace_length=config.girt_brace_length,
+            angle=config.girt_brace_angle,
             at_girt_start=at_girt_start,
         ).shape
         self.girt_braces.append((f"girt_brace_left_{index+1}{suffix}", left_brace))
@@ -267,8 +296,9 @@ class BarnFrame:
         # Right side brace
         right_brace = create_brace_for_girt(
             post=bent.right_post, girt=self.right_girt,
-            brace_section=config.brace_section,
-            distance_from_post=config.brace_distance_from_post,
+            brace_section=config.girt_brace_section,
+            brace_length=config.girt_brace_length,
+            angle=config.girt_brace_angle,
             at_girt_start=at_girt_start,
         ).shape
         self.girt_braces.append((f"girt_brace_right_{index+1}{suffix}", right_brace))
@@ -326,8 +356,10 @@ class BarnFrame:
         ]
         if config.include_girts:
             lines.append(f"Girts: {config.girt_length}mm long, {config.girt_section}mm section")
-        if config.brace_section:
-            lines.append(f"Braces: {config.brace_section}mm section, {config.brace_distance_from_post}mm from post")
+        if config.bent_brace_section:
+            lines.append(f"Bent braces: {config.bent_brace_section}mm section, {config.bent_brace_length:.1f}mm length, {config.bent_brace_angle}°")
+        if config.girt_brace_section:
+            lines.append(f"Girt braces: {config.girt_brace_section}mm section, {config.girt_brace_length:.1f}mm length, {config.girt_brace_angle}°")
         
         # Count parts
         num_posts = len(self.bents) * 2

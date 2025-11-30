@@ -26,6 +26,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Union, TYPE_CHECKING
 from build123d import Part, Polyline, make_face, extrude, Box, Location
+from numpy import angle
 from timber_joints.shouldered_tenon import ShoulderedTenon
 from timber_joints.utils import get_shape_dimensions
 
@@ -111,14 +112,16 @@ class BraceTenon:
         # Tenon tip at brace_bbox_min_x, rotation pivot at that point
         release_box = Box(release_size, brace_width, release_size, 
                         align=(Align.MAX, Align.MIN, Align.MIN))
+        
         # Rotate positive angle (CCW) - box swings up into the tenon
-        release_box = release_box.rotate(Axis.Y, self.brace_angle)
+        release_box = release_box.rotate(Axis.Y, self.brace_angle if self.at_start else 90-self.brace_angle)
         # Move to actual brace start position
         release_box = release_box.move(Location((brace_bbox_min_x, 0, 0)))
 
         release_box_2 = Box(release_size, brace_width, release_size, 
                         align=(Align.MAX, Align.MIN, Align.MIN))
-        release_box_2 = release_box_2.rotate(Axis.Y, math.pi - self.brace_angle)
+        
+        release_box_2 = release_box_2.rotate(Axis.Y, -90+self.brace_angle if self.at_start else -self.brace_angle)
         # Move to tenon length from brace start
         release_box_2 = release_box_2.move(Location((brace_bbox_min_x + self.tenon_length, 0, 0)))
         release_box = release_box + release_box_2
@@ -152,7 +155,7 @@ class BraceTenon:
         self.tenon_height = brace_height
         
         # Calculate shoulder depth from brace angle
-        angle_rad = math.radians(self.brace_angle)
+        angle_rad = math.radians(self.brace_angle if self.at_start else (90 - self.brace_angle))
         shoulder_depth = brace_height * math.tan(angle_rad)
         
         # Apply shouldered tenon with full height

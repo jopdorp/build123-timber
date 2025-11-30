@@ -323,17 +323,18 @@ def _create_brace(
     post: Part,
     horizontal_member: Part,
     brace_section: float,
-    distance_from_post: float,
     at_member_start: bool,
     axis: Axis,
     tenon_width: float = None,
     tenon_height: float = None,
     tenon_length: float = 60.0,
+    angle: float = 45.0,
+    brace_length: float = 707.0,
 ) -> PositionedBrace:
     """Create and position a brace between a post and horizontal member.
     
     This is the core brace creation function that handles both bent braces (X axis)
-    and girt braces (Y axis). The brace runs at approximately 45 degrees, with the
+    and girt braces (Y axis). The brace runs at the specified angle, with the
     brace penetrating into the horizontal member until the lower corner of the brace
     end touches the member bottom surface.
     
@@ -346,12 +347,13 @@ def _create_brace(
         post: The vertical post Part (already positioned)
         horizontal_member: The horizontal beam/girt Part (already positioned)
         brace_section: Cross-section size of the brace (width = height)
-        distance_from_post: Distance from post inside face to brace corner at member
         at_member_start: If True, brace at member start; if False, at member end
         axis: Axis.X for bent braces, Axis.Y for girt braces
         tenon_width: Width of tenon (default: brace_section / 3)
         tenon_height: Height of tenon (default: brace_section * 2/3)
         tenon_length: Length of tenon projection (default: 60mm)
+        angle: Brace angle from horizontal in degrees (default: 45.0)
+        brace_length: Length of the brace in mm (default: 707.0 for ~500mm run at 45°)
     
     Returns:
         PositionedBrace with shape, angle, position info for tenon cuts
@@ -366,15 +368,10 @@ def _create_brace(
     post_center_x = (post_bbox.min.X + post_bbox.max.X) / 2
     post_center_y = (post_bbox.min.Y + post_bbox.max.Y) / 2
     
-    # Calculate connection points
-    horizontal_dist = distance_from_post
-    vertical_dist = horizontal_dist  # 45 degree angle
-    
-    # Calculate angle (from horizontal)
-    angle = calculate_brace_angle(horizontal_dist, vertical_dist)
-    
-    # Calculate actual brace length
-    brace_length = calculate_brace_length(horizontal_dist, vertical_dist)
+    # Calculate horizontal and vertical distances from angle and brace_length
+    import math
+    horizontal_dist = brace_length * math.cos(math.radians(angle))
+    vertical_dist = brace_length * math.sin(math.radians(angle))
     
     # Set up tenon dimensions
     if tenon_width is None:
@@ -395,12 +392,16 @@ def _create_brace(
     post_tenon_at_start = at_member_start
     member_tenon_at_start = not at_member_start
     
+    # For mirrored braces (at_member_start=False), use complementary angle for tenon cuts
+    # This ensures both braces have matching shoulder geometry at their respective ends
+    tenon_angle = angle if at_member_start else 90.0 - angle
+    
     # Cut post tenon
     brace_with_post_tenon = BraceTenon(
         brace=brace_for_cuts,
         tenon_width=tenon_width,
         tenon_length=tenon_length,
-        brace_angle=angle,
+        brace_angle=tenon_angle,
         at_start=post_tenon_at_start,
     )
     
@@ -409,7 +410,7 @@ def _create_brace(
         brace=brace_with_post_tenon.shape,
         tenon_width=tenon_width,
         tenon_length=tenon_length,
-        brace_angle=angle,
+        brace_angle=tenon_angle,
         at_start=member_tenon_at_start,
     )
     brace_with_cuts = brace_with_both_tenons.shape
@@ -479,43 +480,47 @@ def create_brace_for_bent(
     post: Part,
     beam: Part,
     brace_section: float,
-    distance_from_post: float,
+    brace_length: float,
     at_beam_start: bool = True,
     tenon_width: float = None,
     tenon_height: float = None,
     tenon_length: float = 60.0,
+    angle: float = 45.0,
 ) -> PositionedBrace:
     """Create and position a brace between a post and beam in a bent.
     
     This is a higher-level function that creates a brace of the right length
-    and positions it to connect a post to a beam. The brace runs at approximately
-    45 degrees, with the brace penetrating into the beam until the lower corner
+    and positions it to connect a post to a beam. The brace runs at the specified
+    angle, with the brace penetrating into the beam until the lower corner
     of the brace end touches the beam bottom surface.
     
     Args:
         post: The vertical post Part (already positioned)
         beam: The horizontal beam Part (already positioned)
         brace_section: Cross-section size of the brace (width = height)
-        distance_from_post: Distance from post inside face to brace corner at beam
+        brace_length: Length of the brace (before tenon cuts)
         at_beam_start: If True, brace at beam start (left post)
                        If False, brace at beam end (right post)
         tenon_width: Width of tenon (default: brace_section / 3)
         tenon_height: Height of tenon (default: brace_section * 2/3)
         tenon_length: Length of tenon projection (default: 60mm)
+        angle: Brace angle from horizontal in degrees (default: 45.0)
     
     Returns:
         PositionedBrace with shape, angle, position info for tenon cuts
     """
+    # Pass the original angle - _create_brace handles the mirroring internally
     return _create_brace(
         post=post,
         horizontal_member=beam,
         brace_section=brace_section,
-        distance_from_post=distance_from_post,
+        brace_length=brace_length,
         at_member_start=at_beam_start,
         axis=Axis.X,
         tenon_width=tenon_width,
         tenon_height=tenon_height,
         tenon_length=tenon_length,
+        angle=angle,
     )
 
 
@@ -523,42 +528,46 @@ def create_brace_for_girt(
     post: Part,
     girt: Part,
     brace_section: float,
-    distance_from_post: float = 300.0,
+    brace_length: float,
     at_girt_start: bool = True,
     tenon_width: float = None,
     tenon_height: float = None,
     tenon_length: float = 60.0,
+    angle: float = 45.0,
 ) -> PositionedBrace:
     """Create and position a brace between a post and girt.
     
     Similar to create_brace_for_bent, but for girts which run along the Y axis.
-    The brace runs at approximately 45 degrees, with the brace penetrating into 
+    The brace runs at the specified angle, with the brace penetrating into 
     the girt until the lower corner of the brace end touches the girt bottom.
     
     Args:
         post: The vertical post Part (already positioned)
         girt: The horizontal girt Part (already positioned, running along Y)
         brace_section: Cross-section size of the brace (width = height)
-        distance_from_post: Distance from post inside face for brace bottom connection  
+        brace_length: Length of the brace (before tenon cuts)
         at_girt_start: If True, brace at girt start (toward -Y)
                        If False, brace at girt end (toward +Y)
         tenon_width: Width of tenon (default: brace_section / 3)
         tenon_height: Height of tenon (default: brace_section * 2/3)
         tenon_length: Length of tenon projection (default: 60mm)
+        angle: Brace angle from horizontal in degrees (default: 45.0)
     
     Returns:
         PositionedBrace with shape, angle, position info for tenon cuts
     """
+    # Pass the original angle - _create_brace handles the mirroring internally
     return _create_brace(
         post=post,
         horizontal_member=girt,
         brace_section=brace_section,
-        distance_from_post=distance_from_post,
+        brace_length=brace_length,
         at_member_start=at_girt_start,
         axis=Axis.Y,
         tenon_width=tenon_width,
         tenon_height=tenon_height,
         tenon_length=tenon_length,
+        angle=angle,
     )
 
 

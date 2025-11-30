@@ -17,6 +17,10 @@ from timber_joints.fea import show_fea_results, LoadBC
 reset_show()
 
 # Frame dimensions
+# Bent braces: 30°, longer (1000mm brace length)
+# Girt braces: 45°, shorter (707mm brace length, ~500mm horizontal)
+import math
+
 config = BarnConfig(
     post_height=3000,
     post_section=150,
@@ -29,8 +33,14 @@ config = BarnConfig(
     housing_depth=20,
     post_top_extension=300,
     girt_section=150,
-    brace_section=100,
-    brace_distance_from_post=500,
+    # Bent braces: 30°, larger (150mm section, 1000mm length)
+    bent_brace_section=150,
+    bent_brace_length=1000.0,
+    bent_brace_angle=30.0,
+    # Girt braces: 45°, smaller (100mm section, ~707mm length)
+    girt_brace_section=100,
+    girt_brace_length=707.1,  # 500 / cos(45°)
+    girt_brace_angle=45.0,
 )
 
 # Build the barn

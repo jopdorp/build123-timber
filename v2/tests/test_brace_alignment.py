@@ -45,7 +45,7 @@ class TestBentBraceAlignment:
             post=left_post,
             beam=beam,
             brace_section=100,
-            distance_from_post=500,
+            brace_length=707.1067811865476,  # 500 / cos(45°)
             at_beam_start=True,
         )
 
@@ -53,7 +53,7 @@ class TestBentBraceAlignment:
             post=right_post,
             beam=beam,
             brace_section=100,
-            distance_from_post=500,
+            brace_length=707.1067811865476,  # 500 / cos(45°)
             at_beam_start=False,
         )
 
@@ -184,7 +184,7 @@ class TestGirtBraceAlignment:
             post=vertical_post,
             girt=positioned_girt,
             brace_section=100,
-            distance_from_post=400,
+            brace_length=565.685424949238,  # 400 / cos(45°)
             at_girt_start=False,
         )
 
@@ -273,7 +273,7 @@ class TestGirtBraceAtStartAlignment:
             post=vertical_post,
             girt=positioned_girt,
             brace_section=100,
-            distance_from_post=400,
+            brace_length=565.685424949238,  # 400 / cos(45°)
             at_girt_start=True,  # Brace points toward -Y
         )
 
@@ -349,7 +349,7 @@ class TestBraceSymmetry:
             post=left_post,
             beam=beam,
             brace_section=100,
-            distance_from_post=500,
+            brace_length=707.1067811865476,  # 500 / cos(45°)
             at_beam_start=True,
         )
 
@@ -357,7 +357,7 @@ class TestBraceSymmetry:
             post=right_post,
             beam=beam,
             brace_section=100,
-            distance_from_post=500,
+            brace_length=707.1067811865476,  # 500 / cos(45°)
             at_beam_start=False,
         )
 
