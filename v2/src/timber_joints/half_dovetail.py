@@ -1,13 +1,11 @@
 """Half-dovetail joint - dovetail insert at top or bottom of beam."""
 
 from dataclasses import dataclass
-from build123d import Align, Box, Part, Location
-from timber_joints.base_joint import BaseJoint
-from timber_joints.utils import create_dovetail_cut
+from timber_joints.dovetail import DovetailInsert
 
 
 @dataclass
-class HalfDovetail(BaseJoint):
+class HalfDovetail(DovetailInsert):
     """A half-dovetail - dovetail insert positioned at top or bottom of beam.
     
     Same as DovetailInsert but at top/bottom instead of centered.
@@ -17,45 +15,16 @@ class HalfDovetail(BaseJoint):
     - dovetail_width: Width at the narrow end (base)
     - dovetail_height: Height of the dovetail projection
     - dovetail_length: How far the dovetail extends from the beam end
-    - dovetail_angle: Angle of taper in degrees
+    - cone_angle: Angle of taper in degrees (renamed from dovetail_angle for consistency)
     - at_start: If True, create at start (X=0); if False, at end (X=length)
     - at_top: If True, position at top; if False, position at bottom
     """
     
-    dovetail_width: float
-    dovetail_height: float
-    dovetail_length: float
-    dovetail_angle: float = 10.0
-    at_start: bool = False
     at_top: bool = True
 
-    @property
-    def shape(self) -> Part:
-        """Create the half-dovetail."""
-        x_pos = 0 if self.at_start else self._length - self.dovetail_length
-        
-        # Only difference from DovetailInsert: z_center at top or bottom instead of middle
+    def _get_z_center(self) -> float:
+        """Position dovetail at top or bottom instead of center."""
         if self.at_top:
-            z_center = self._height - self.dovetail_height / 2
+            return self._height - self.dovetail_height / 2
         else:
-            z_center = self.dovetail_height / 2
-        
-        end_section = Box(
-            self.dovetail_length,
-            self._width,
-            self._height,
-            align=(Align.MIN, Align.MIN, Align.MIN)
-        )
-        end_section = end_section.move(Location((x_pos, 0, 0)))
-        
-        dovetail_keep = create_dovetail_cut(
-            base_width=self.dovetail_width,
-            height=self.dovetail_height,
-            length=self.dovetail_length,
-            cone_angle=self.dovetail_angle,
-            y_center=self._width / 2,
-            z_center=z_center,
-        )
-        dovetail_keep = dovetail_keep.move(Location((x_pos, 0, 0)))
-        
-        return self._input_shape - (end_section - dovetail_keep)
+            return self.dovetail_height / 2

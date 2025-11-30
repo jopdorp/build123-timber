@@ -77,7 +77,7 @@ class DovetailInsert(BaseJoint):
             length=self.dovetail_length,
             cone_angle=self.cone_angle,
             y_center=self._width / 2,
-            z_center=self._height / 2,
+            z_center=self._get_z_center(),
         )
         dovetail_keep = dovetail_keep.move(Location((x_pos, 0, 0)))
         
@@ -85,6 +85,10 @@ class DovetailInsert(BaseJoint):
         waste = end_section - dovetail_keep
         
         return self._input_shape - waste
+
+    def _get_z_center(self) -> float:
+        """Get the Z center position for the dovetail. Override in subclasses."""
+        return self._height / 2
 
     def __repr__(self) -> str:
         position = "start" if self.at_start else "end"

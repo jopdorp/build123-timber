@@ -158,7 +158,7 @@ half_dt = HalfDovetail(
     dovetail_width=40,
     dovetail_height=50,
     dovetail_length=70,
-    dovetail_angle=20.0,
+    cone_angle=20.0,
     at_start=False,
     at_top=True
 )
