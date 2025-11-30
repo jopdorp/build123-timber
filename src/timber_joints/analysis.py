@@ -213,7 +213,7 @@ def find_mesh_contact_faces(
     
     Returns:
         Tuple of (faces_a, faces_b) where each is a list of (element_id, face_number)
-        for CalculiX *SURFACE definition. Face numbers are 1-4 for C3D4 elements.
+        for CalculiX ``*SURFACE`` definition. Face numbers are 1-4 for C3D4 elements.
     """
     # C3D4 face definitions: which nodes form each face
     face_node_indices = [
@@ -409,7 +409,7 @@ def find_mesh_faces_on_surface(
         bbox_margin: Margin (mm) to expand bbox for filtering
     
     Returns:
-        List of (element_id, face_number) tuples for CalculiX *SURFACE definition
+        List of (element_id, face_number) tuples for CalculiX ``*SURFACE`` definition
     """
     # C3D4 face definitions
     face_node_indices = [
@@ -629,7 +629,7 @@ def generate_friction_contact_steps(
         n_load_steps: Number of load increments (default 10 = 10% each)
         friction_coeff: Coefficient of friction μ (default 0.4 for wood)
         stick_slope: Stick slope for penalty friction (default 2000)
-        use_stabilize: Use *FRICTION, STABILIZE for additional stability
+        use_stabilize: Use ``*FRICTION, STABILIZE`` for additional stability
         stabilize_coeff: Stabilization coefficient (default 0.05)
     
     Returns:
@@ -750,7 +750,7 @@ def generate_calculix_contact_input(
     3. Incrementally increases load with friction active
     
     Args:
-        mesh_file: Path to mesh.inp file (will use *INCLUDE)
+        mesh_file: Path to mesh.inp file (will use ``*INCLUDE``)
         material: TimberMaterial with orthotropic properties
         fixed_nodes_left: Node IDs fixed at left support
         fixed_nodes_right: Node IDs fixed at right support
@@ -760,7 +760,7 @@ def generate_calculix_contact_input(
         margin_gap: Initial contact gap in mm
         n_load_steps: Number of load increments
         friction_coeff: Coefficient of friction μ
-        use_stabilize: Use *FRICTION, STABILIZE
+        use_stabilize: Use ``*FRICTION, STABILIZE``
     
     Returns:
         Complete CalculiX input file content as string

@@ -9,7 +9,7 @@ A comprehensive timber joinery and structural framing library for build123d.
 
    installation
    quickstart
-   api/index
+   api/timber_joints
    examples
 
 Features

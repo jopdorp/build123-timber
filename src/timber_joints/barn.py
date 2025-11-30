@@ -108,24 +108,23 @@ class Bent:
 class BarnFrame:
     """A complete barn frame structure.
     
-    Create a barn with:
-    ```python
-    config = BarnConfig(
-        post_height=3000,
-        beam_length=5000,
-        num_bents=3,
-        bent_spacing=3000,
-    )
-    barn = BarnFrame.build(config)
+    Example::
     
-    # Access parts
-    for bent in barn.bents:
-        show_object(bent.left_post)
-        show_object(bent.beam)
-    
-    show_object(barn.left_girt)
-    show_object(barn.right_girt)
-    ```
+        config = BarnConfig(
+            post_height=3000,
+            beam_length=5000,
+            num_bents=3,
+            bent_spacing=3000,
+        )
+        barn = BarnFrame.build(config)
+        
+        # Access parts
+        for bent in barn.bents:
+            show_object(bent.left_post)
+            show_object(bent.beam)
+        
+        show_object(barn.left_girt)
+        show_object(barn.right_girt)
     """
     config: BarnConfig
     bents: list[Bent] = field(default_factory=list)

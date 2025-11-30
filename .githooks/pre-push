@@ -29,6 +29,12 @@ cd "$REPO_ROOT/docs" || exit 1
 echo "Cleaning previous build..."
 rm -rf _build
 
+# Auto-generate API documentation from source
+echo "Generating API documentation..."
+rm -rf api/
+sphinx-apidoc -o api/ ../src/timber_joints --force --module-first --separate
+rm -f api/modules.rst  # Not needed in toctree
+
 # Build HTML documentation
 echo "Building HTML documentation..."
 if make html; then

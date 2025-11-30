@@ -1,20 +1,21 @@
-"""
-Brace Tenon Joint for diagonal timber braces.
+"""Brace Tenon Joint for diagonal timber braces.
 
 The brace tenon is a shouldered tenon with release cuts that allow the tenon
 to fit cleanly into the receiving member (post or beam).
 
 CRITICAL GEOMETRY:
+
 - The brace is horizontal (axis-aligned along X) when these cuts are made
 - The shoulder creates an angled bearing surface
 - Release cuts must be VERTICAL after rotation (aligned with the receiving member)
 - This means: on the horizontal brace, release cuts are at the BRACE ANGLE
 
 Release cuts:
+
 1. Side release: A vertical plane (after rotation) that starts at the shoulder edge
    and runs along the side of the tenon. This prevents the tenon sides from
    binding against the mortise walls.
-   
+
 2. Tip release: A vertical plane (after rotation) at the tenon tip that creates
    clearance for the tenon to seat properly.
 

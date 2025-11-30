@@ -31,7 +31,7 @@ class StepParameters:
 class GrainOrientation:
     """Material orientation for orthotropic wood grain direction.
     
-    CalculiX *ORIENTATION uses two vectors (a, b) to define material axes:
+    CalculiX ``*ORIENTATION`` uses two vectors (a, b) to define material axes:
     - Material axis 1 = a direction (grain/longitudinal)
     - Material axis 2 = a × (b × a), normalized
     - Material axis 3 = a × b, normalized

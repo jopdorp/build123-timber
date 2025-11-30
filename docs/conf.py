@@ -49,8 +49,28 @@ autodoc_default_options = {
     "special-members": "__init__",
     "undoc-members": True,
     "exclude-members": "__weakref__",
+    "imported-members": False,
 }
 autodoc_mock_imports = ["build123d", "ocp_vscode", "gmsh", "OCP"]
+
+# Suppress duplicate/ambiguous reference warnings from re-exported symbols  
+suppress_warnings = ["autodoc.import_cycle", "ref.python", "autodoc", "app.add_node"]
+
+# Ignore duplicate object descriptions (common with re-exported symbols)
+def setup(app):
+    app.registry.source_suffix = {'.rst': 'restructuredtext'}
+    
+    # Suppress duplicate warnings
+    import logging
+    class DuplicateFilter(logging.Filter):
+        def filter(self, record):
+            return "duplicate object description" not in record.getMessage()
+    
+    logging.getLogger('sphinx').addFilter(DuplicateFilter())
+    logging.getLogger('sphinx.domains.python').addFilter(DuplicateFilter())
+
+# Don't document imported members (prevents duplicates)
+autodoc_inherit_docstrings = False
 
 # Intersphinx mapping
 intersphinx_mapping = {
