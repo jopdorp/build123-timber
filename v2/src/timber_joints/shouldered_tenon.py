@@ -110,20 +110,6 @@ class ShoulderedTenon:
         
         return self._input_shape - final_cut
 
-    @property
-    def cut_shape(self) -> Part:
-        """Return the shape used to cut the tenon (without the wedge subtraction)."""
-        tenon_waste = create_tenon_cut(
-            beam_length=self._length,
-            beam_width=self._width,
-            beam_height=self._height,
-            tenon_width=self.tenon_width,
-            tenon_height=self.tenon_height,
-            tenon_length=self.tenon_length + self.shoulder_depth,
-            at_start=self.at_start,
-        )
-        return tenon_waste
-
     @property 
     def shoulder_angle(self) -> float:
         """Return the shoulder angle in degrees."""
