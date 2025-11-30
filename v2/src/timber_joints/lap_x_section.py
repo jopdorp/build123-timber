@@ -2,12 +2,12 @@
 
 from dataclasses import dataclass
 from build123d import Part
-from timber_joints.beam import Beam
+from timber_joints.base_joint import BaseJoint
 from timber_joints.utils import create_lap_cut
 
 
 @dataclass
-class LapXSection:
+class LapXSection(BaseJoint):
     """A lap joint cut at a specific point along the beam (not at the end).
     
     Creates a lap cut centered around a specified X position along the beam.
@@ -21,7 +21,6 @@ class LapXSection:
     - from_top: If True, cut from top; if False, cut from bottom
     """
     
-    beam: Beam
     cut_depth: float
     cut_length: float
     x_position: float
@@ -29,8 +28,10 @@ class LapXSection:
 
     def __post_init__(self) -> None:
         """Validate lap parameters."""
-        if self.cut_depth <= 0 or self.cut_depth >= self.beam.height:
-            raise ValueError(f"cut_depth must be between 0 and beam height ({self.beam.height})")
+        super().__post_init__()
+        
+        if self.cut_depth <= 0 or self.cut_depth >= self._height:
+            raise ValueError(f"cut_depth must be between 0 and beam height ({self._height})")
         if self.cut_length <= 0:
             raise ValueError("cut_length must be positive")
         
@@ -38,27 +39,25 @@ class LapXSection:
         half_length = self.cut_length / 2
         if self.x_position - half_length < 0:
             raise ValueError(f"Lap cut extends past beam start (x_position={self.x_position}, cut_length={self.cut_length})")
-        if self.x_position + half_length > self.beam.length:
+        if self.x_position + half_length > self._length:
             raise ValueError(f"Lap cut extends past beam end (x_position={self.x_position}, cut_length={self.cut_length})")
 
     @property
     def shape(self) -> Part:
         """Create the beam with a lap cut at the specified cross-section."""
-        result = self.beam.shape
-        
         # Calculate X start position (centered on x_position)
         x_start = self.x_position - self.cut_length / 2
         
         cut = create_lap_cut(
-            beam_width=self.beam.width,
-            beam_height=self.beam.height,
+            beam_width=self._width,
+            beam_height=self._height,
             cut_depth=self.cut_depth,
             cut_length=self.cut_length,
             x_position=x_start,
             from_top=self.from_top,
         )
         
-        return result - cut
+        return self._input_shape - cut
 
     def __repr__(self) -> str:
         direction = "top" if self.from_top else "bottom"
