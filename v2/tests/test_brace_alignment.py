@@ -239,6 +239,95 @@ class TestGirtBraceAlignment:
         assert brace_bb.min.Y < post_bb.max.Y, "Girt brace should penetrate into post"
 
 
+class TestGirtBraceAtStartAlignment:
+    """Test brace alignment for girt (Y-axis) braces with at_girt_start=True.
+    
+    This tests the case where the brace points toward -Y (away from +Y girt end).
+    This was a missing test case that uncovered a bug in Y-axis correction.
+    """
+
+    @pytest.fixture
+    def girt_start_setup(self):
+        """Create a post with girt and brace pointing toward -Y."""
+        post_height = 2500
+        post_section = 150
+        girt_length = 3000
+        girt_section = 150
+
+        post = Beam(length=post_height, width=post_section, height=post_section)
+        girt = Beam(length=girt_length, width=girt_section, height=girt_section)
+
+        vertical_post = make_post_vertical(post.shape)
+        girt_along_y = girt.shape.rotate(Axis.Z, 90)
+
+        post_bbox = vertical_post.bounding_box()
+        girt_bbox = girt_along_y.bounding_box()
+        drop_depth = girt_section
+        target_x = (post_bbox.min.X + post_bbox.max.X) / 2 - (girt_bbox.min.X + girt_bbox.max.X) / 2
+        target_z = post_bbox.max.Z - drop_depth - girt_bbox.min.Z
+        target_y = post_bbox.max.Y - girt_bbox.min.Y
+
+        positioned_girt = girt_along_y.move(Location((target_x, target_y, target_z)))
+
+        brace_result = create_brace_for_girt(
+            post=vertical_post,
+            girt=positioned_girt,
+            brace_section=100,
+            distance_from_post=400,
+            at_girt_start=True,  # Brace points toward -Y
+        )
+
+        return {
+            "post": vertical_post,
+            "girt": positioned_girt,
+            "brace": brace_result,
+        }
+
+    def test_girt_brace_at_start_position_snapshot(self, girt_start_setup):
+        """Verify girt brace (at_girt_start=True) bounding box matches expected snapshot values."""
+        brace = girt_start_setup["brace"]
+        bb = brace.shape.bounding_box()
+
+        # Snapshot values from known-good alignment (verified visually 2024-11-30)
+        expected = {
+            "min_x": -124.99999999999991,
+            "min_y": -291.8751380983298,
+            "min_z": 2057.2303282608686,
+            "max_x": -24.99999999999983,
+            "max_y": 43.32094051199403,
+            "max_z": 2392.4264068711927,
+        }
+        assert abs(bb.min.X - expected["min_x"]) < TOLERANCE, f"min.X: expected {expected['min_x']}, got {bb.min.X:.2f}"
+        assert abs(bb.min.Y - expected["min_y"]) < TOLERANCE, f"min.Y: expected {expected['min_y']}, got {bb.min.Y:.2f}"
+        assert abs(bb.min.Z - expected["min_z"]) < TOLERANCE, f"min.Z: expected {expected['min_z']}, got {bb.min.Z:.2f}"
+        assert abs(bb.max.X - expected["max_x"]) < TOLERANCE, f"max.X: expected {expected['max_x']}, got {bb.max.X:.2f}"
+        assert abs(bb.max.Y - expected["max_y"]) < TOLERANCE, f"max.Y: expected {expected['max_y']}, got {bb.max.Y:.2f}"
+        assert abs(bb.max.Z - expected["max_z"]) < TOLERANCE, f"max.Z: expected {expected['max_z']}, got {bb.max.Z:.2f}"
+
+    def test_girt_brace_at_start_angle(self, girt_start_setup):
+        """Verify girt brace angle is 45 degrees."""
+        brace = girt_start_setup["brace"]
+        assert abs(brace.angle - 45.0) < 0.1, f"Expected 45°, got {brace.angle:.2f}°"
+
+    def test_girt_brace_at_start_at_beam_end(self, girt_start_setup):
+        """Verify girt brace is NOT at girt end (at_girt_start=True means at_beam_end=False)."""
+        brace = girt_start_setup["brace"]
+        assert brace.at_beam_end is False
+
+    def test_girt_brace_at_start_penetrates_girt(self, girt_start_setup):
+        """Verify girt brace penetrates into the girt (max.Z > girt.min.Z)."""
+        brace_bb = girt_start_setup["brace"].shape.bounding_box()
+        girt_bb = girt_start_setup["girt"].bounding_box()
+        assert brace_bb.max.Z > girt_bb.min.Z, "Girt brace should penetrate into girt"
+
+    def test_girt_brace_at_start_penetrates_post(self, girt_start_setup):
+        """Verify girt brace penetrates into the post."""
+        brace_bb = girt_start_setup["brace"].shape.bounding_box()
+        post_bb = girt_start_setup["post"].bounding_box()
+        # Girt brace max.Y should be greater than post min.Y (penetrates into post from -Y side)
+        assert brace_bb.max.Y > post_bb.min.Y, "Girt brace should penetrate into post"
+
+
 class TestBraceSymmetry:
     """Test that left and right braces are symmetric."""
 
