@@ -45,6 +45,85 @@ def get_tenon_penetration(brace_tenon: "BraceTenon") -> float:
     return brace_tenon.rotated_cut_bbox_width
 
 
+def _calculate_brace_position_along_axis(
+    post_bbox_min: float,
+    post_bbox_max: float,
+    rot_bbox_min: float,
+    rot_bbox_max: float,
+    penetration: float,
+    at_member_start: bool,
+    invert: bool = False,
+) -> float:
+    """Calculate brace position along the horizontal axis (X or Y).
+    
+    This is a generic calculation that works for both X-axis (bent braces)
+    and Y-axis (girt braces). Y-axis braces use inverted logic.
+    
+    Args:
+        post_bbox_min: Post bounding box min along the axis
+        post_bbox_max: Post bounding box max along the axis
+        rot_bbox_min: Rotated brace bounding box min along the axis
+        rot_bbox_max: Rotated brace bounding box max along the axis
+        penetration: How far the tenon penetrates into the post
+        at_member_start: If True, brace at member start; if False, at member end
+        invert: If True, invert the start/end logic (used for Y-axis)
+        
+    Returns:
+        Target position for the brace along the axis
+    """
+    # For Y-axis, the geometry is inverted
+    use_start_logic = at_member_start if not invert else not at_member_start
+    
+    if use_start_logic:
+        # Brace tilts toward the start, post on start side
+        post_inside = post_bbox_max
+        return post_inside - rot_bbox_min - penetration
+    else:
+        # Brace tilts toward the end, post on end side
+        post_inside = post_bbox_min
+        return post_inside - rot_bbox_max + penetration
+
+
+def _get_axis_values(bbox, axis: Axis) -> tuple[float, float]:
+    """Get min/max values along the specified axis from a bounding box.
+    
+    Args:
+        bbox: A bounding box with min/max attributes
+        axis: Axis.X or Axis.Y
+        
+    Returns:
+        (min_value, max_value) along the axis
+    """
+    if axis == Axis.X:
+        return bbox.min.X, bbox.max.X
+    else:  # Axis.Y
+        return bbox.min.Y, bbox.max.Y
+
+
+def _get_perpendicular_axis(axis: Axis) -> Axis:
+    """Get the perpendicular axis (X <-> Y)."""
+    return Axis.Y if axis == Axis.X else Axis.X
+
+
+def _calculate_brace_centering(
+    post_center: float,
+    rot_bbox_min: float,
+    rot_bbox_max: float,
+) -> float:
+    """Calculate brace position to center it on the post.
+    
+    Args:
+        post_center: Center of the post along the centering axis
+        rot_bbox_min: Rotated brace bounding box min along the centering axis
+        rot_bbox_max: Rotated brace bounding box max along the centering axis
+        
+    Returns:
+        Target position for the brace along the centering axis
+    """
+    rot_bbox_center = (rot_bbox_min + rot_bbox_max) / 2
+    return post_center - rot_bbox_center
+
+
 def _calculate_beam_position(
     beam: Part,
     post: Part,
@@ -377,10 +456,6 @@ def _create_brace(
     post_bbox = post.bounding_box()
     member_bbox = horizontal_member.bounding_box()
     
-    # Get post center
-    post_center_x = (post_bbox.min.X + post_bbox.max.X) / 2
-    post_center_y = (post_bbox.min.Y + post_bbox.max.Y) / 2
-    
     # Set up tenon dimensions
     if tenon_width is None:
         tenon_width = brace_section / 3
@@ -455,31 +530,29 @@ def _create_brace(
 
     # Target Z: brace top aligns with member bottom + penetration
     target_top_z = member_bbox.min.Z + vertical_penetration
-    
-    # Z positioning uses the no-cuts bbox
     target_z = target_top_z - rot_bbox.max.Z
     
-    # Position along the brace axis - reference correct bbox edge based on orientation
-    if axis == Axis.X:
-        if at_member_start:
-            # Brace tilts up-left, post on left side - use bbox.min.X
-            post_inside = post_bbox.max.X
-            target_x = post_inside - rot_bbox.min.X - horizontal_penetration
-        else:
-            # Brace tilts up-right, post on right side - use bbox.max.X
-            post_inside = post_bbox.min.X
-            target_x = post_inside - rot_bbox.max.X + horizontal_penetration
-        target_y = post_center_y - (rot_bbox.min.Y + rot_bbox.max.Y) / 2
-    else:  # axis == Axis.Y
-        if at_member_start:
-            # Brace toward -Y, post on +Y side - use bbox.max.Y
-            post_inside = post_bbox.min.Y
-            target_y = post_inside - rot_bbox.max.Y + horizontal_penetration
-        else:
-            # Brace toward +Y, post on -Y side - use bbox.min.Y
-            post_inside = post_bbox.max.Y
-            target_y = post_inside - rot_bbox.min.Y - horizontal_penetration
-        target_x = post_center_x - (rot_bbox.min.X + rot_bbox.max.X) / 2
+    # Position along the brace axis - same logic for X and Y
+    # Get coordinates along the brace axis and perpendicular to it
+    perp_axis = _get_perpendicular_axis(axis)
+    post_bbox_along = _get_axis_values(post_bbox, axis)
+    rot_bbox_along = _get_axis_values(rot_bbox, axis)
+    post_center_perp = (post_bbox.min.Y + post_bbox.max.Y) / 2 if axis == Axis.X else (post_bbox.min.X + post_bbox.max.X) / 2
+    rot_bbox_perp = _get_axis_values(rot_bbox, perp_axis)
+    
+    # Y-axis uses inverted logic
+    invert = axis == Axis.Y
+    
+    target_along = _calculate_brace_position_along_axis(
+        post_bbox_along[0], post_bbox_along[1],
+        rot_bbox_along[0], rot_bbox_along[1],
+        horizontal_penetration, at_member_start, invert
+    )
+    target_perp = _calculate_brace_centering(post_center_perp, rot_bbox_perp[0], rot_bbox_perp[1])
+    
+    # Assign to X/Y based on axis
+    target_x = target_along if axis == Axis.X else target_perp
+    target_y = target_perp if axis == Axis.X else target_along
     
     # Position the cut brace using the calculated targets
     positioned_brace = rotated_brace_with_cuts.move(Location((target_x, target_y, target_z)))
