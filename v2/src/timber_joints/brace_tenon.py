@@ -106,7 +106,14 @@ class BraceTenon:
                         align=(Align.MAX, Align.MIN, Align.MIN))
         # Rotate positive angle (CCW) - box swings up into the tenon
         release_box = release_box.rotate(Axis.Y, self.brace_angle)
-        
+
+        release_box_2 = Box(release_size, brace_width, release_size, 
+                        align=(Align.MAX, Align.MIN, Align.MIN))
+        release_box_2 = release_box_2.rotate(Axis.Y, math.pi - self.brace_angle)
+
+        release_box_2 = release_box_2.move(Location((self.tenon_length, 0, 0)))
+        release_box = release_box + release_box_2
+
         if not self.at_start:
             # Mirror around the center of the brace (YZ plane at X=brace_length/2)
             mirror_plane = Plane.YZ.offset(brace_length / 2)
