@@ -1,6 +1,30 @@
 """Alignment utilities for positioning timber joints."""
 
+import math
+from dataclasses import dataclass
 from build123d import Location, Axis, Part
+
+
+@dataclass
+class PositionedBrace:
+    """A brace with its positioning and angle information.
+    
+    This stores the brace Part along with the angle needed for creating
+    specialized tenon cuts. The tenon cuts have:
+    - One face aligned with the brace angle
+    - Another face perpendicular to the post/beam/girt (90°)
+    - The tip aligned with the post/beam/girt surface
+    
+    Attributes:
+        shape: The positioned brace Part
+        angle: Angle from horizontal in degrees (e.g., 45° for equal horizontal/vertical)
+        at_beam_end: True if brace is at beam end (right), False if at beam start (left)
+        brace_section: Cross-section size of the brace
+    """
+    shape: Part
+    angle: float  # degrees from horizontal
+    at_beam_end: bool  # True = right/end side, False = left/start side
+    brace_section: float
 
 
 def _calculate_beam_position(
@@ -260,7 +284,295 @@ def position_for_blind_mortise(
         return beam_for_cut, post
 
 
-def build_complete_bent(
+def calculate_brace_angle(
+    horizontal_distance: float,
+    vertical_distance: float,
+) -> float:
+    """Calculate the angle of a brace from horizontal.
+    
+    Args:
+        horizontal_distance: Horizontal span of the brace (X or Y direction)
+        vertical_distance: Vertical span of the brace (Z direction)
+    
+    Returns:
+        Angle in degrees from horizontal (0 = horizontal, 90 = vertical)
+    """
+    return math.degrees(math.atan2(vertical_distance, horizontal_distance))
+
+
+def calculate_brace_length(
+    horizontal_distance: float,
+    vertical_distance: float,
+) -> float:
+    """Calculate the required length of a brace.
+    
+    Args:
+        horizontal_distance: Horizontal span of the brace (X or Y direction)
+        vertical_distance: Vertical span of the brace (Z direction)
+    
+    Returns:
+        Length of the brace (diagonal distance)
+    """
+    return math.sqrt(horizontal_distance**2 + vertical_distance**2)
+
+
+def create_brace_for_bent(
+    post: Part,
+    beam: Part,
+    brace_section: float,
+    distance_from_post: float,
+    at_beam_start: bool = True,
+    tenon_width: float = None,
+    tenon_height: float = None,
+    tenon_length: float = 60.0,
+) -> PositionedBrace:
+    """Create and position a brace between a post and beam in a bent.
+    
+    This is a higher-level function that creates a brace of the right length
+    and positions it to connect a post to a beam. The brace runs at approximately
+    45 degrees, with the brace penetrating into the beam until the lower corner
+    of the brace end touches the beam bottom surface.
+    
+    Args:
+        post: The vertical post Part (already positioned)
+        beam: The horizontal beam Part (already positioned)
+        brace_section: Cross-section size of the brace (width = height)
+        distance_from_post: Distance from post inside face to brace corner at beam
+        at_beam_start: If True, brace at beam start (left post)
+                       If False, brace at beam end (right post)
+        tenon_width: Width of tenon (default: brace_section / 3)
+        tenon_height: Height of tenon (default: brace_section * 2/3)
+        tenon_length: Length of tenon projection (default: 60mm)
+    
+    Returns:
+        PositionedBrace with shape, angle, position info for tenon cuts
+    """
+    from timber_joints.beam import Beam
+    from timber_joints.brace_tenon import BraceTenon
+    
+    post_bbox = post.bounding_box()
+    beam_bbox = beam.bounding_box()
+    
+    # Get post dimensions
+    post_center_x = (post_bbox.min.X + post_bbox.max.X) / 2
+    post_center_y = (post_bbox.min.Y + post_bbox.max.Y) / 2
+    
+    # Calculate connection points
+    # Horizontal distance: from post inside face to where brace corner meets beam
+    # Vertical distance: same as horizontal for 45 degree angle
+    horizontal_dist = distance_from_post
+    vertical_dist = horizontal_dist  # 45 degree angle
+    
+    # Calculate actual brace length (center-to-center, not corner-to-corner)
+    brace_length = calculate_brace_length(horizontal_dist, vertical_dist)
+    
+    # Create the brace
+    brace_beam = Beam(length=brace_length, width=brace_section, height=brace_section)
+    brace = brace_beam.shape
+    
+    # Calculate angle (from horizontal)
+    angle = calculate_brace_angle(horizontal_dist, vertical_dist)
+    
+    # Apply tenon cuts BEFORE rotation (while brace is axis-aligned)
+    if tenon_width is None:
+        tenon_width = brace_section / 3
+    if tenon_height is None:
+        tenon_height = brace_section * 2 / 3
+    
+    # Cut tenon at post end (start of brace, X=0)
+    brace_with_post_tenon = BraceTenon(
+        brace=brace,
+        tenon_width=tenon_width,
+        tenon_height=tenon_height,
+        tenon_length=tenon_length,
+        brace_angle=angle,
+        at_start=True,
+    )
+    
+    # Cut tenon at beam end (end of brace, X=length)
+    brace_with_both_tenons = BraceTenon(
+        brace=brace_with_post_tenon.shape,
+        tenon_width=tenon_width,
+        tenon_height=tenon_height,
+        tenon_length=tenon_length,
+        brace_angle=angle,
+        at_start=False,
+    )
+    brace = brace_with_both_tenons.shape
+    
+    # Rotate brace to correct angle
+    # Brace starts horizontal along X (from 0 to length), rotate around Y axis to tilt it
+    # Positive rotation around Y: +X end goes DOWN (negative Z)
+    # Negative rotation around Y: +X end goes UP (positive Z)
+    if at_beam_start:
+        # Left brace: high end toward +X (beam side), low end toward post
+        # We want +X end at higher Z, so use NEGATIVE angle
+        rotated_brace = brace.rotate(Axis.Y, -angle)
+    else:
+        # Right brace: high end toward -X (beam side), low end toward +X (post)
+        # We want -X end at higher Z, so use POSITIVE angle
+        rotated_brace = brace.rotate(Axis.Y, angle)
+
+    # Position the brace AFTER rotation
+    rot_bbox = rotated_brace.bounding_box()
+    
+    # We want the LOWER corner of the brace's top end to touch beam bottom
+    # This means the brace penetrates INTO the beam
+    # The "lower corner at top end" corresponds to a specific point on the rotated brace
+    # For simplicity: position so that at the top-end X coordinate, the lowest Z point
+    # of the brace cross-section is at beam bottom
+    
+    # The brace center at the top end is at height = beam_bottom + half_brace_height_in_Z
+    # For a 45° rotated square, the half-height in Z direction = brace_section * sin(45°) / sqrt(2)
+    # Actually for a square rotated 45° around its length axis, height = width * sqrt(2)
+    # But we're rotating around Y (pitch), not around X (roll)
+    # 
+    # After Y rotation by angle: the brace cross-section is still a square in the YZ plane
+    # The bbox height in Z at the high end = brace_section (unchanged by Y rotation)
+    # So the lower corner of the top end is at: top_center_z - brace_section/2
+    # We want this at beam_bottom: top_center_z - brace_section/2 = beam_bottom
+    # So: top_center_z = beam_bottom + brace_section/2
+    
+    # The rotated bbox max.Z is at the top corner of the high end
+    # The center of the high end is at max.Z - brace_section/2 (in unrotated coords)
+    # After rotation, the vertical extent at the tip stays brace_section
+    
+    if at_beam_start:
+        # Left brace: high end is at max X
+        post_inside_x = post_bbox.max.X
+        target_corner_x = post_inside_x + distance_from_post
+        
+        # Position so lower corner of top end touches beam bottom
+        # For a tilted brace, the lower corner is at center - brace_section/2 * sin(angle)
+        # We want that at beam_bottom, so center_z = beam_bottom + brace_section/2 * sin(angle)
+        # And max.Z of rotated bbox = center_z + brace_section/2
+        # So max.Z = beam_bottom + brace_section/2 * sin(angle) + brace_section/2
+        #          = beam_bottom + brace_section/2 * (sin(angle) + 1)
+        # But simpler: penetration = brace_section * sin(angle) (distance from lower to upper corner in Z)
+        penetration = brace_section * math.sin(math.radians(angle))
+        target_top_z = beam_bbox.min.Z + penetration
+        
+        target_x = target_corner_x - rot_bbox.max.X
+        target_z = target_top_z - rot_bbox.max.Z
+    else:
+        # Right brace: high end is at min X
+        post_inside_x = post_bbox.min.X
+        target_corner_x = post_inside_x - distance_from_post
+        
+        penetration = brace_section * math.sin(math.radians(angle))
+        target_top_z = beam_bbox.min.Z + penetration
+        
+        target_x = target_corner_x - rot_bbox.min.X
+        target_z = target_top_z - rot_bbox.max.Z
+
+    # Center on Y (same as post)
+    target_y = post_center_y - (rot_bbox.min.Y + rot_bbox.max.Y) / 2
+
+    positioned_shape = rotated_brace.move(Location((target_x, target_y, target_z)))
+    return PositionedBrace(
+        shape=positioned_shape,
+        angle=angle,
+        at_beam_end=not at_beam_start,
+        brace_section=brace_section,
+    )
+
+
+def create_brace_for_girt(
+    post: Part,
+    girt: Part,
+    brace_section: float,
+    distance_from_post: float = 300.0,
+    at_girt_start: bool = True,
+) -> PositionedBrace:
+    """Create and position a brace between a post and girt.
+    
+    Similar to create_brace_for_bent, but for girts which run along the Y axis.
+    The brace runs at approximately 45 degrees, with the brace penetrating into 
+    the girt until the lower corner of the brace end touches the girt bottom.
+    
+    Args:
+        post: The vertical post Part (already positioned)
+        girt: The horizontal girt Part (already positioned, running along Y)
+        brace_section: Cross-section size of the brace (width = height)
+        distance_from_post: Distance from post inside face for brace bottom connection  
+        at_girt_start: If True, brace at girt start (toward -Y)
+                       If False, brace at girt end (toward +Y)
+    
+    Returns:
+        PositionedBrace with shape, angle, position info for tenon cuts
+    """
+    from timber_joints.beam import Beam
+    
+    post_bbox = post.bounding_box()
+    girt_bbox = girt.bounding_box()
+    
+    # Get post dimensions
+    post_center_x = (post_bbox.min.X + post_bbox.max.X) / 2
+    
+    # Calculate connection points
+    horizontal_dist = distance_from_post
+    vertical_dist = horizontal_dist  # 45 degree angle
+    
+    # Calculate angle (from horizontal)
+    angle = calculate_brace_angle(horizontal_dist, vertical_dist)
+    
+    # Calculate actual brace length
+    brace_length = calculate_brace_length(horizontal_dist, vertical_dist)
+    
+    # Create the brace
+    brace_beam = Beam(length=brace_length, width=brace_section, height=brace_section)
+    brace = brace_beam.shape
+    
+    # Rotate brace:
+    # 1. First rotate 90° around Z to align with Y axis (now runs from Y=0 to Y=length)
+    # 2. Then rotate around X axis to tilt it
+    # Positive X rotation: +Y end goes UP (positive Z)
+    # Negative X rotation: +Y end goes DOWN (negative Z)
+    rotated_brace = brace.rotate(Axis.Z, 90)  # Now along Y
+
+    if at_girt_start:
+        # Brace toward -Y: top (high Z) should be at lower Y (away from post)
+        # We want -Y end at higher Z, so use NEGATIVE angle
+        rotated_brace = rotated_brace.rotate(Axis.X, -angle)
+        post_inside_y = post_bbox.min.Y
+        top_y = post_inside_y - distance_from_post
+    else:
+        # Brace toward +Y: top (high Z) should be at higher Y (away from post)
+        # We want +Y end at higher Z, so use POSITIVE angle
+        rotated_brace = rotated_brace.rotate(Axis.X, angle)
+        post_inside_y = post_bbox.max.Y
+        top_y = post_inside_y + distance_from_post
+
+    # Position the brace
+    rot_bbox = rotated_brace.bounding_box()
+
+    # Center on X (same as post)
+    target_x = post_center_x - (rot_bbox.min.X + rot_bbox.max.X) / 2
+    
+    # Position so lower corner of top end touches girt bottom
+    # Penetration = brace_section * sin(angle)
+    penetration = brace_section * math.sin(math.radians(angle))
+    target_top_z = girt_bbox.min.Z + penetration
+
+    if at_girt_start:
+        # After -angle: max Z is near min Y
+        target_y = top_y - rot_bbox.min.Y
+        target_z = target_top_z - rot_bbox.max.Z
+    else:
+        # After +angle: max Z is near max Y
+        target_y = top_y - rot_bbox.max.Y
+        target_z = target_top_z - rot_bbox.max.Z
+
+    positioned_shape = rotated_brace.move(Location((target_x, target_y, target_z)))
+    return PositionedBrace(
+        shape=positioned_shape,
+        angle=angle,
+        at_beam_end=not at_girt_start,
+        brace_section=brace_section,
+    )
+
+
+def  build_complete_bent(
     post_height: float = 3000,
     post_section: float = 150,
     beam_length: float = 5000,

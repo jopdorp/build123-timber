@@ -7,6 +7,7 @@ from timber_joints.tenon import Tenon
 from timber_joints.shouldered_tenon import ShoulderedTenon
 from timber_joints.dovetail import DovetailInsert
 from timber_joints.half_dovetail import HalfDovetail
+from timber_joints.brace_tenon import BraceTenon
 from timber_joints.alignment import (
     align_beam_on_post,
     align_beam_in_post,
@@ -14,6 +15,11 @@ from timber_joints.alignment import (
     create_receiving_cut,
     position_for_blind_mortise,
     build_complete_bent,
+    calculate_brace_angle,
+    calculate_brace_length,
+    create_brace_for_bent,
+    create_brace_for_girt,
+    PositionedBrace,
 )
 from timber_joints.utils import get_shape_dimensions
 
@@ -62,6 +68,7 @@ __all__ = [
     "ShoulderedTenon",
     "DovetailInsert",
     "HalfDovetail",
+    "BraceTenon",
     # Utilities
     "get_shape_dimensions",
     # Alignment
@@ -71,6 +78,11 @@ __all__ = [
     "create_receiving_cut",
     "position_for_blind_mortise",
     "build_complete_bent",
+    "calculate_brace_angle",
+    "calculate_brace_length",
+    "create_brace_for_bent",
+    "create_brace_for_girt",
+    "PositionedBrace",
     # Frame assembly
     "Role",
     "Element",

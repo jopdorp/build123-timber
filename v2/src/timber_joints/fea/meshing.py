@@ -297,10 +297,13 @@ def write_mesh_inp(
                 else:
                     f.write(", ")
         
-        # Combined element set for all timber
+        # Combined element set for all timber (max 16 entries per line for CalculiX)
         f.write("*ELSET, ELSET=TIMBER\n")
         elset_names = [name.upper().replace(" ", "_") for name in mesh.element_sets.keys()]
-        f.write(", ".join(elset_names) + "\n")
+        # Write names in chunks of 16 (CalculiX limit)
+        for i in range(0, len(elset_names), 16):
+            chunk = elset_names[i:i+16]
+            f.write(", ".join(chunk) + "\n")
         
         # Contact surfaces
         if contact_surfaces:
