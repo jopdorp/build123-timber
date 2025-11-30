@@ -415,8 +415,7 @@ def _create_brace(
     )
     brace_with_cuts = brace_with_both_tenons.shape
     
-    # Get penetration depths from tenon cuts
-    vertical_penetration = brace_with_both_tenons.rotated_cut_bbox_height
+    # Horizontal penetration still uses the post tenon geometry directly
     horizontal_penetration = brace_with_post_tenon.rotated_cut_bbox_width
     
     # Determine rotation axis for tilting (perpendicular to brace direction)
@@ -435,6 +434,14 @@ def _create_brace(
     
     # Use brace WITHOUT cuts for positioning (consistent bbox)
     rot_bbox = rotated_brace_no_cuts.bounding_box()
+    cut_bbox = rotated_brace_with_cuts.bounding_box()
+    
+    # Only the tenon should enter the horizontal member. The shoulder must sit flush
+    # against the member face, so we compute penetration as:
+    #   (difference between no-cut and cut tops) + tenon vertical component
+    shoulder_offset = rot_bbox.max.Z - cut_bbox.max.Z
+    tenon_vertical = tenon_length * math.sin(math.radians(angle))
+    vertical_penetration = shoulder_offset + tenon_vertical
     
     # Target Z: brace top aligns with member bottom + penetration
     target_top_z = member_bbox.min.Z + vertical_penetration
