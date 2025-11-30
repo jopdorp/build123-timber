@@ -1,5 +1,6 @@
 """Timber Joints v2 - Simplified timber joinery library."""
 
+from timber_joints.base_joint import BaseJoint
 from timber_joints.beam import Beam
 from timber_joints.lap_joint import LapJoint
 from timber_joints.lap_x_section import LapXSection
@@ -61,6 +62,7 @@ from timber_joints.analysis import (
 
 __all__ = [
     # Core
+    "BaseJoint",
     "Beam",
     "LapJoint",
     "LapXSection",

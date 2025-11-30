@@ -1,14 +1,13 @@
 """Lap joint - positive/inserting part only."""
 
-from dataclasses import dataclass, field
-from typing import Union
+from dataclasses import dataclass
 from build123d import Part
-from timber_joints.beam import Beam
-from timber_joints.utils import create_lap_cut, get_shape_dimensions
+from timber_joints.base_joint import BaseJoint
+from timber_joints.utils import create_lap_cut
 
 
 @dataclass
-class LapJoint:
+class LapJoint(BaseJoint):
     """The positive (inserting) part of a lap joint.
     
     This is the beam end that has material removed from one side,
@@ -21,20 +20,13 @@ class LapJoint:
     - from_top: If True, cut from top face; if False, cut from bottom face
     """
     
-    beam: Union[Beam, Part]
     cut_depth: float
     cut_length: float
     from_top: bool = True
-    
-    # Computed dimensions (from bounding box)
-    _input_shape: Part = field(init=False, repr=False)
-    _length: float = field(init=False, repr=False)
-    _width: float = field(init=False, repr=False)
-    _height: float = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Validate lap joint parameters."""
-        self._input_shape, self._length, self._width, self._height = get_shape_dimensions(self.beam)
+        super().__post_init__()
         
         if self.cut_depth <= 0 or self.cut_depth >= self._height:
             raise ValueError(f"cut_depth must be between 0 and beam height ({self._height})")

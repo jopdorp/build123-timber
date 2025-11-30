@@ -1,15 +1,14 @@
 """Shouldered tenon - tenon with angled shoulder (no mortise/housing)."""
 
 import math
-from dataclasses import dataclass, field
-from typing import Union
+from dataclasses import dataclass
 from build123d import Part, Polyline, make_face, extrude, Axis, Location
-from timber_joints.beam import Beam
-from timber_joints.utils import create_tenon_cut, get_shape_dimensions
+from timber_joints.base_joint import BaseJoint
+from timber_joints.utils import create_tenon_cut
 
 
 @dataclass
-class ShoulderedTenon:
+class ShoulderedTenon(BaseJoint):
     """A tenon with an angled shoulder - inserting part only.
     
     Creates a tenon with a triangular/angled shoulder. The shoulder surface
@@ -25,22 +24,15 @@ class ShoulderedTenon:
     - at_start: If True, create at start (X=0); if False, at end (X=length)
     """
     
-    beam: Union[Beam, Part]
     tenon_width: float
     tenon_height: float
     tenon_length: float
     shoulder_depth: float = 15.0
     at_start: bool = False
-    
-    # Computed dimensions (from bounding box)
-    _input_shape: Part = field(init=False, repr=False)
-    _length: float = field(init=False, repr=False)
-    _width: float = field(init=False, repr=False)
-    _height: float = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Validate shouldered tenon parameters."""
-        self._input_shape, self._length, self._width, self._height = get_shape_dimensions(self.beam)
+        super().__post_init__()
         
         if self.tenon_width <= 0 or self.tenon_width > self._width:
             raise ValueError(f"tenon_width must be between 0 and beam width ({self._width})")
