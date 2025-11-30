@@ -348,3 +348,40 @@ class BarnFrame:
         ])
         
         return "\n".join(lines)
+    
+    def to_fea_frame(self):
+        """Create an FEA TimberFrame from this barn for structural analysis.
+        
+        Returns:
+            timber_joints.fea.TimberFrame ready for analyze()
+            
+        Example:
+            barn = BarnFrame.build(config)
+            fea_frame = barn.to_fea_frame()
+            result = fea_frame.analyze(output_dir=Path("output"))
+        """
+        from timber_joints.fea import TimberFrame, MemberType
+        
+        frame = TimberFrame()
+        
+        # Add bent members
+        for i, bent in enumerate(self.bents):
+            frame.add_member(f"bent{i+1}_left_post", bent.left_post)
+            frame.add_member(f"bent{i+1}_right_post", bent.right_post)
+            frame.add_member(f"bent{i+1}_beam", bent.beam)
+            if bent.brace_left:
+                frame.add_member(f"bent{i+1}_brace_left", bent.brace_left, MemberType.BRACE)
+            if bent.brace_right:
+                frame.add_member(f"bent{i+1}_brace_right", bent.brace_right, MemberType.BRACE)
+        
+        # Add girts
+        if self.left_girt:
+            frame.add_member("left_girt", self.left_girt)
+        if self.right_girt:
+            frame.add_member("right_girt", self.right_girt)
+        
+        # Add girt braces
+        for name, brace in self.girt_braces:
+            frame.add_member(name, brace, MemberType.BRACE)
+        
+        return frame
