@@ -74,10 +74,10 @@ class TestBentBraceAlignment:
         expected = {
             "min_x": -42.426406771192546,
             "min_y": 25.0,
-            "min_z": 2158.12486190167,
-            "max_x": 392.76967183913126,
+            "min_z": 2134.8528137423855,
+            "max_x": 415.14718635761477,
             "max_y": 125.00000000000003,
-            "max_z": 2593.320940511994,
+            "max_z": 2592.4264068711927,
         }
         assert abs(bb.min.X - expected["min_x"]) < TOLERANCE, f"min.X: expected {expected['min_x']}, got {bb.min.X:.2f}"
         assert abs(bb.min.Y - expected["min_y"]) < TOLERANCE, f"min.Y: expected {expected['min_y']}, got {bb.min.Y:.2f}"
@@ -291,10 +291,10 @@ class TestGirtBraceAtStartAlignment:
         # Snapshot values from known-good alignment (verified visually 2024-11-30)
         expected = {
             "min_x": -124.99999999999991,
-            "min_y": -291.8751380983298,
-            "min_z": 2057.2303282608686,
+            "min_y": -315.14718625761435,
+            "min_z": 2034.8528137423855,
             "max_x": -24.99999999999983,
-            "max_y": 43.32094051199403,
+            "max_y": 42.42640687119288,
             "max_z": 2392.4264068711927,
         }
         assert abs(bb.min.X - expected["min_x"]) < TOLERANCE, f"min.X: expected {expected['min_x']}, got {bb.min.X:.2f}"
@@ -392,8 +392,8 @@ class TestBraceSymmetry:
         left_z_extent = left_bb.max.Z - left_bb.min.Z
         right_z_extent = right_bb.max.Z - right_bb.min.Z
         
-        # Expected values: left=435.1960786103241, right=457.5735931288072 (diff ~22mm due to quarter correction)
-        assert abs(left_z_extent - 435.1960786103241) < TOLERANCE, f"Left Z extent: expected 435.1960786103241, got {left_z_extent:.2f}"
+        # Expected values: both braces now have the same Z extent (symmetric)
+        assert abs(left_z_extent - 457.5735931288072) < TOLERANCE, f"Left Z extent: expected 457.5735931288072, got {left_z_extent:.2f}"
         assert abs(right_z_extent - 457.5735931288072) < TOLERANCE, f"Right Z extent: expected 457.5735931288072, got {right_z_extent:.2f}"
 
     def test_braces_similar_beam_penetration(self, bent_setup):
@@ -405,9 +405,9 @@ class TestBraceSymmetry:
         left_penetration = left_bb.max.Z - beam_bb.min.Z
         right_penetration = right_bb.max.Z - beam_bb.min.Z
         
-        # Expected penetrations (differ slightly due to quarter correction)
-        assert abs(left_penetration - 43.320940511994195) < TOLERANCE, \
-            f"Left penetration: expected 43.320940511994195, got {left_penetration:.2f}"
+        # Expected penetrations (now symmetric)
+        assert abs(left_penetration - 42.42640687119274) < TOLERANCE, \
+            f"Left penetration: expected 42.42640687119274, got {left_penetration:.2f}"
         assert abs(right_penetration - 42.42640687119274) < TOLERANCE, \
             f"Right penetration: expected 42.42640687119274, got {right_penetration:.2f}"
 

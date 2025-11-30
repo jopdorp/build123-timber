@@ -434,19 +434,12 @@ def _create_brace(
     
     # Use brace WITHOUT cuts for positioning (consistent bbox)
     rot_bbox = rotated_brace_no_cuts.bounding_box()
-    # Use brace WITH cuts for the actual shape and for correction calculation
-    cut_bbox = rotated_brace_with_cuts.bounding_box()
     
     # Target Z: brace top aligns with member bottom + penetration
     target_top_z = member_bbox.min.Z + vertical_penetration
     
-    # Z positioning uses the no-cuts bbox, with correction for at_member_start on X-axis only
-    if at_member_start and axis == Axis.X:
-        # X-axis left brace needs quarter correction due to asymmetric tenon cut effects
-        z_correction = rot_bbox.max.Z - cut_bbox.max.Z
-        target_z = target_top_z - rot_bbox.max.Z + z_correction / 4
-    else:
-        target_z = target_top_z - rot_bbox.max.Z
+    # Z positioning uses the no-cuts bbox
+    target_z = target_top_z - rot_bbox.max.Z
     
     # Position along the brace axis - reference correct bbox edge based on orientation
     if axis == Axis.X:
@@ -462,10 +455,8 @@ def _create_brace(
     else:  # axis == Axis.Y
         if at_member_start:
             # Brace toward -Y, post on +Y side - use bbox.max.Y
-            # Apply quarter correction to Y (same as Z correction for X-axis braces)
             post_inside = post_bbox.min.Y
-            y_correction = rot_bbox.max.Y - cut_bbox.max.Y
-            target_y = post_inside - rot_bbox.max.Y + horizontal_penetration + y_correction / 4
+            target_y = post_inside - rot_bbox.max.Y + horizontal_penetration
         else:
             # Brace toward +Y, post on -Y side - use bbox.min.Y
             post_inside = post_bbox.max.Y

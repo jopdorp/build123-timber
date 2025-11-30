@@ -69,15 +69,16 @@ class ShoulderedTenon(BaseJoint):
     @property
     def shape(self) -> Part:
         """Create the shouldered tenon with angled shoulder."""
-        # Calculate positions
+        # Calculate positions using actual bbox boundaries (not assuming X starts at 0)
         if self.at_start:
-            x_deep = 0
-            x_flush = self.shoulder_depth
+            x_deep = self._bbox_min_x
+            x_flush = self._bbox_min_x + self.shoulder_depth
         else:
-            x_flush = self._length - self.tenon_length
+            x_flush = self._bbox_max_x - self.tenon_length
             x_deep = x_flush - self.shoulder_depth
         
         # Get the tenon cut (material around the tenon portion)
+        # create_tenon_cut works on a normalized beam, so we need to offset the result
         tenon_waste = create_tenon_cut(
             beam_length=self._length,
             beam_width=self._width,
@@ -87,6 +88,8 @@ class ShoulderedTenon(BaseJoint):
             tenon_length=self.tenon_length + self.shoulder_depth,
             at_start=self.at_start,
         )
+        # Move tenon_waste to account for bbox offset
+        tenon_waste = tenon_waste.move(Location((self._bbox_min_x, 0, 0)))
         
         # Create the shoulder wedge (material to keep, not cut)
         shoulder_wedge = self._create_shoulder_wedge(x_deep, x_flush)

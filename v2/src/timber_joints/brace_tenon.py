@@ -81,7 +81,8 @@ class BraceTenon:
 
     def _create_release_cuts(
         self, 
-        brace_length: float,
+        brace_bbox_min_x: float,
+        brace_bbox_max_x: float,
         brace_width: float, 
         brace_height: float,
         shoulder_depth: float,
@@ -93,30 +94,39 @@ class BraceTenon:
         vertical after the brace is rotated into position.
         
         For at_start=False, we mirror the shape around the center of the brace.
+        
+        Args:
+            brace_bbox_min_x: Minimum X coordinate of the brace bounding box
+            brace_bbox_max_x: Maximum X coordinate of the brace bounding box
+            brace_width: Width of the brace (Y direction)
+            brace_height: Height of the brace (Z direction)
+            shoulder_depth: Depth of the shoulder cut
         """
         from build123d import Axis, Align, Plane
         
         # Release cut box size - make it big enough
         release_size = brace_height * 2
 
-        # Create release box for at_start=True case
-        # Tenon tip at X=0, rotation pivot at (0, 0, 0)
-        # Box aligned with max X at 0, min Z at 0 (sitting at bottom-left corner)
+        # Create release box for at_start=True case, positioned at actual brace start
+        # Tenon tip at brace_bbox_min_x, rotation pivot at that point
         release_box = Box(release_size, brace_width, release_size, 
                         align=(Align.MAX, Align.MIN, Align.MIN))
         # Rotate positive angle (CCW) - box swings up into the tenon
         release_box = release_box.rotate(Axis.Y, self.brace_angle)
+        # Move to actual brace start position
+        release_box = release_box.move(Location((brace_bbox_min_x, 0, 0)))
 
         release_box_2 = Box(release_size, brace_width, release_size, 
                         align=(Align.MAX, Align.MIN, Align.MIN))
         release_box_2 = release_box_2.rotate(Axis.Y, math.pi - self.brace_angle)
-
-        release_box_2 = release_box_2.move(Location((self.tenon_length, 0, 0)))
+        # Move to tenon length from brace start
+        release_box_2 = release_box_2.move(Location((brace_bbox_min_x + self.tenon_length, 0, 0)))
         release_box = release_box + release_box_2
 
         if not self.at_start:
-            # Mirror around the center of the brace (YZ plane at X=brace_length/2)
-            mirror_plane = Plane.YZ.offset(brace_length / 2)
+            # Mirror around the actual center of the brace (using bbox center, not just length/2)
+            brace_center_x = (brace_bbox_min_x + brace_bbox_max_x) / 2
+            mirror_plane = Plane.YZ.offset(brace_center_x)
             release_box = release_box.mirror(mirror_plane)
             
         return Part(release_box.wrapped)
@@ -132,8 +142,11 @@ class BraceTenon:
         """
         brace_shape = self._brace_shape
         
-        # Get dimensions of brace
-        _, brace_length, brace_width, brace_height = get_shape_dimensions(brace_shape)
+        # Get dimensions of brace - need bounding box for position info
+        brace_bbox = brace_shape.bounding_box()
+        brace_length = brace_bbox.max.X - brace_bbox.min.X
+        brace_width = brace_bbox.max.Y - brace_bbox.min.Y
+        brace_height = brace_bbox.max.Z - brace_bbox.min.Z
         
         # Tenon is full height
         self.tenon_height = brace_height
@@ -155,9 +168,9 @@ class BraceTenon:
         # Get the base shape with shoulder
         result_shape = shouldered.shape
         
-        # Create and apply release cuts
+        # Create and apply release cuts using actual bounding box positions
         release_cuts = self._create_release_cuts(
-            brace_length, brace_width, brace_height, shoulder_depth
+            brace_bbox.min.X, brace_bbox.max.X, brace_width, brace_height, shoulder_depth
         )
         
         result_shape = result_shape - release_cuts

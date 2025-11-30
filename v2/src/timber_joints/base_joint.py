@@ -26,10 +26,17 @@ class BaseJoint:
     _length: float = field(init=False, repr=False)
     _width: float = field(init=False, repr=False)
     _height: float = field(init=False, repr=False)
+    # Bounding box offsets (to handle shapes that don't start at origin)
+    _bbox_min_x: float = field(init=False, repr=False)
+    _bbox_max_x: float = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Extract dimensions from beam."""
         self._input_shape, self._length, self._width, self._height = get_shape_dimensions(self.beam)
+        # Also store the actual bbox positions for correct positioning
+        bbox = self._input_shape.bounding_box()
+        self._bbox_min_x = bbox.min.X
+        self._bbox_max_x = bbox.max.X
     
     @property
     def shape(self) -> Part:
