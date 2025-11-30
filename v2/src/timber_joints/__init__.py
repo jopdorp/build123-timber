@@ -34,6 +34,13 @@ from timber_joints.frame import (
     bay_frame,
 )
 
+# Barn frame builder
+from timber_joints.barn import (
+    BarnConfig,
+    Bent,
+    BarnFrame,
+)
+
 # Export adapters
 from timber_joints.export import (
     export_frame_to_ifc,
@@ -92,6 +99,10 @@ __all__ = [
     "TimberFrame",
     "simple_bent",
     "bay_frame",
+    # Barn frame builder
+    "BarnConfig",
+    "Bent",
+    "BarnFrame",
     # Export
     "export_frame_to_ifc",
     "show_frame",
