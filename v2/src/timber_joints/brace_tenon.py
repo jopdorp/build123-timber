@@ -44,8 +44,10 @@ class BraceTenon:
     brace_angle: float = None  # degrees, read from PositionedBrace if not provided
     at_start: bool = True
 
-    # Computed field
+    # Computed fields
     shape: Part = field(init=False, repr=False)
+    rotated_cut_bbox_height: float = field(init=False, repr=False)
+    rotated_cut_bbox_width: float = field(init=False, repr=False)
 
     def __post_init__(self):
         # Import here to avoid circular import
@@ -61,27 +63,25 @@ class BraceTenon:
                 raise ValueError("brace_angle is required when brace is a Part")
             self._brace_shape = self.brace
         
-        self.shape = self._create_brace_tenon()
+        self.shape, self.rotated_cut_bbox_height, self.rotated_cut_bbox_width = self._create_brace_tenon()
 
-    def _create_brace_tenon(self) -> Part:
+    def _create_brace_tenon(self) -> tuple[Part, float, float]:
         """
         Apply shouldered tenon to the axis-aligned brace.
         The shoulder depth is calculated from the brace angle.
+        
+        Returns:
+            (shape, rotated_cut_bbox_height, rotated_cut_bbox_width) - the cut brace and penetration depths
         """
         brace_shape = self._brace_shape
         
         # Get dimensions of brace
-        _, brace_length, brace_width, brace_height = get_shape_dimensions(brace_shape)
+        _, _, _, brace_height = get_shape_dimensions(brace_shape)
         
         # Calculate shoulder depth from brace angle
         # The shoulder creates the angled cut at the tenon base
         angle_rad = math.radians(self.brace_angle)
         shoulder_depth = brace_height * math.tan(angle_rad)
-        
-        # Ensure shoulder_depth + tenon_length fits in brace
-        max_total = brace_length / 3
-        if shoulder_depth + self.tenon_length > max_total:
-            shoulder_depth = max(1.0, max_total - self.tenon_length)
         
         # Apply shouldered tenon
         shouldered = ShoulderedTenon(
@@ -93,5 +93,5 @@ class BraceTenon:
             at_start=self.at_start,
         )
         
-        return shouldered.shape
+        return shouldered.shape, shouldered.rotated_cut_bbox_height, shouldered.rotated_cut_bbox_width
 

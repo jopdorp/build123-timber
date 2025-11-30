@@ -223,7 +223,10 @@ def test_girt_braces():
     print(f"Girt bbox: Y=[{girt_bbox.min.Y:.0f}, {girt_bbox.max.Y:.0f}], Z=[{girt_bbox.min.Z:.0f}, {girt_bbox.max.Z:.0f}]")
     print(f"Girt brace bbox: Y=[{brace_bbox.min.Y:.0f}, {brace_bbox.max.Y:.0f}], Z=[{brace_bbox.min.Z:.0f}, {brace_bbox.max.Z:.0f}]")
     
-    # Brace top should penetrate into girt (lower corner at girt bottom)
+    show_object(vertical_post, name="Girt Post", options={"color": "sienna", "alpha": 0.3})
+    show_object(positioned_girt, name="Girt", options={"color": "burlywood", "alpha": 0.3})
+    show_object(brace, name="Girt Brace", options={"color": "orange", "alpha": 0.6})
+    # Brace should penetrate into girt (tenon goes into the girt)
     assert brace_bbox.max.Z > girt_bbox.min.Z, "Girt brace should penetrate into girt"
     
     print("✓ Girt brace created and positioned correctly")
@@ -232,4 +235,5 @@ def test_girt_braces():
 if __name__ == "__main__":
     # Only run the bent with braces test for visual verification
     test_bent_with_braces()
+    test_girt_braces()
     print("\n✅ Visual brace test complete - check the OCP viewer!")

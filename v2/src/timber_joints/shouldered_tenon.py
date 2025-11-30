@@ -1,5 +1,6 @@
 """Shouldered tenon - tenon with angled shoulder (no mortise/housing)."""
 
+import math
 from dataclasses import dataclass, field
 from typing import Union
 from build123d import Part, Polyline, make_face, extrude, Axis, Location
@@ -108,6 +109,49 @@ class ShoulderedTenon:
         final_cut = tenon_waste - shoulder_wedge
         
         return self._input_shape - final_cut
+
+    @property
+    def cut_shape(self) -> Part:
+        """Return the shape used to cut the tenon (without the wedge subtraction)."""
+        tenon_waste = create_tenon_cut(
+            beam_length=self._length,
+            beam_width=self._width,
+            beam_height=self._height,
+            tenon_width=self.tenon_width,
+            tenon_height=self.tenon_height,
+            tenon_length=self.tenon_length + self.shoulder_depth,
+            at_start=self.at_start,
+        )
+        return tenon_waste
+
+    @property 
+    def shoulder_angle(self) -> float:
+        """Return the shoulder angle in degrees."""
+        return math.degrees(math.atan2(self.shoulder_depth, self._height))
+
+    @property
+    def rotated_cut_bbox_height(self) -> float:
+        """Return the vertical penetration depth when the tenon is rotated by shoulder angle.
+        
+        This is how far the brace end extends vertically (Z) when the brace is tilted.
+        Use this for penetration into horizontal members (beams/girts).
+        Includes both tenon_length and shoulder_depth.
+        """
+        angle_rad = math.radians(self.shoulder_angle)
+        total_cut_length = self.tenon_length + self.shoulder_depth
+        return total_cut_length * math.sin(angle_rad)
+
+    @property
+    def rotated_cut_bbox_width(self) -> float:
+        """Return the horizontal penetration depth when the tenon is rotated by shoulder angle.
+        
+        This is how far the brace end extends horizontally (X or Y) when the brace is tilted.
+        Use this for penetration into vertical members (posts).
+        Includes both tenon_length and shoulder_depth.
+        """
+        angle_rad = math.radians(self.shoulder_angle)
+        total_cut_length = self.tenon_length + self.shoulder_depth
+        return total_cut_length * math.cos(angle_rad)
 
     def __repr__(self) -> str:
         position = "start" if self.at_start else "end"

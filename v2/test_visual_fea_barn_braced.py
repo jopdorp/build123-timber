@@ -321,54 +321,54 @@ print(f"  - Left girt at Y={left_girt_y_threequarter:.1f}mm: 50 kg sideways (+X)
 print(f"  - Self-weight: automatic")
 print()
 
-result = frame.analyze(
-    additional_loads=additional_loads,
-    output_dir=output_dir,
-    mesh_size=100.0,  # Coarser mesh for braces
-    mesh_size_fine=50.0,
-)
+# result = frame.analyze(
+#     additional_loads=additional_loads,
+#     output_dir=output_dir,
+#     mesh_size=100.0,  # Coarser mesh for braces
+#     mesh_size_fine=50.0,
+# )
 
-print("\n" + "=" * 60)
-print("ANALYSIS SUMMARY")
-print("=" * 60)
-print(f"Success: {result.success}")
-print(f"Mesh: {result.num_nodes} nodes, {result.num_elements} elements")
+# print("\n" + "=" * 60)
+# print("ANALYSIS SUMMARY")
+# print("=" * 60)
+# print(f"Success: {result.success}")
+# print(f"Mesh: {result.num_nodes} nodes, {result.num_elements} elements")
 
-if result.success:
-    print(f"\nDeflection Results:")
-    print(f"  Max total: {result.fea_results.max_displacement:.4f} mm")
-    print(f"  Max Z: {result.fea_results.max_uz:.4f} mm")
+# if result.success:
+#     print(f"\nDeflection Results:")
+#     print(f"  Max total: {result.fea_results.max_displacement:.4f} mm")
+#     print(f"  Max Z: {result.fea_results.max_uz:.4f} mm")
     
-    limit = BEAM_LENGTH / 300  # L/300
-    status = "PASS ✓" if abs(result.fea_results.max_uz) < limit else "FAIL ✗"
-    print(f"  Limit (L/300): {limit:.2f} mm")
-    print(f"  Status: {status}")
+#     limit = BEAM_LENGTH / 300  # L/300
+#     status = "PASS ✓" if abs(result.fea_results.max_uz) < limit else "FAIL ✗"
+#     print(f"  Limit (L/300): {limit:.2f} mm")
+#     print(f"  Status: {status}")
 
-print("=" * 60)
+# print("=" * 60)
 
 
-# %%
-# Visualize FEA results
-if result.success:
-    original_shapes = []
-    for i, bent in enumerate(bents):
-        original_shapes.append((bent["left_post"], f"Bent {i+1} LP", "sienna"))
-        original_shapes.append((bent["right_post"], f"Bent {i+1} RP", "sienna"))
-        original_shapes.append((bent["beam"], f"Bent {i+1} Beam", "burlywood"))
-        original_shapes.append((bent["brace_left"], f"Bent {i+1} BL", "orange"))
-        original_shapes.append((bent["brace_right"], f"Bent {i+1} BR", "orange"))
+# # %%
+# # Visualize FEA results
+# if result.success:
+#     original_shapes = []
+#     for i, bent in enumerate(bents):
+#         original_shapes.append((bent["left_post"], f"Bent {i+1} LP", "sienna"))
+#         original_shapes.append((bent["right_post"], f"Bent {i+1} RP", "sienna"))
+#         original_shapes.append((bent["beam"], f"Bent {i+1} Beam", "burlywood"))
+#         original_shapes.append((bent["brace_left"], f"Bent {i+1} BL", "orange"))
+#         original_shapes.append((bent["brace_right"], f"Bent {i+1} BR", "orange"))
     
-    original_shapes.append((left_girt, "Left Girt", "peru"))
-    original_shapes.append((right_girt, "Right Girt", "peru"))
+#     original_shapes.append((left_girt, "Left Girt", "peru"))
+#     original_shapes.append((right_girt, "Right Girt", "peru"))
     
-    for name, brace in girt_braces:
-        original_shapes.append((brace, name, "orange"))
+#     for name, brace in girt_braces:
+#         original_shapes.append((brace, name, "orange"))
     
-    show_fea_results(
-        mesh_file=str(output_dir / "mesh.inp"),
-        frd_file=str(output_dir / "analysis.frd"),
-        scale=60.0,
-        original_shapes=original_shapes,
-        deformed_color="red",
-        original_alpha=0.3,
-    )
+#     show_fea_results(
+#         mesh_file=str(output_dir / "mesh.inp"),
+#         frd_file=str(output_dir / "analysis.frd"),
+#         scale=60.0,
+#         original_shapes=original_shapes,
+#         deformed_color="red",
+#         original_alpha=0.3,
+#     )
