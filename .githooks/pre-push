@@ -35,6 +35,35 @@ rm -rf api/
 sphinx-apidoc -o api/ ../src/timber_joints --force --module-first --separate
 rm -f api/modules.rst  # Not needed in toctree
 
+# Auto-generate examples.rst from examples/ directory
+echo "Generating examples documentation..."
+cat > examples.rst << 'EOF'
+Examples
+========
+
+Complete examples demonstrating library usage.
+
+EOF
+
+# Add each Python file in examples/ directory
+for example in ../examples/*.py; do
+    if [ -f "$example" ]; then
+        filename=$(basename "$example")
+        # Convert filename to title (remove .py, replace _ with space, title case)
+        title=$(echo "${filename%.py}" | sed 's/_/ /g' | sed 's/\b\(.\)/\u\1/g')
+        
+        cat >> examples.rst << EOF
+$title
+$(printf '%*s' ${#title} | tr ' ' '-')
+
+.. literalinclude:: ../examples/$filename
+   :language: python
+   :linenos:
+
+EOF
+    fi
+done
+
 # Build HTML documentation
 echo "Building HTML documentation..."
 if make html; then

@@ -41,6 +41,37 @@ jobs:
         run: |
           source .venv/bin/activate
           cd docs
+          
+          # Auto-generate API documentation
+          rm -rf api/
+          sphinx-apidoc -o api/ ../src/timber_joints --force --module-first --separate
+          rm -f api/modules.rst
+          
+          # Auto-generate examples.rst
+          cat > examples.rst << 'EXAMPLES_EOF'
+          Examples
+          ========
+
+          Complete examples demonstrating library usage.
+
+          EXAMPLES_EOF
+          
+          for example in ../examples/*.py; do
+            if [ -f "$example" ]; then
+              filename=$(basename "$example")
+              title=$(echo "${filename%.py}" | sed 's/_/ /g' | sed 's/\b\(.\)/\u\1/g')
+              cat >> examples.rst << EXAMPLE_EOF
+          $title
+          $(printf '%*s' ${#title} | tr ' ' '-')
+
+          .. literalinclude:: ../examples/$filename
+             :language: python
+             :linenos:
+
+          EXAMPLE_EOF
+            fi
+          done
+          
           make html
 
       - name: Upload artifact
