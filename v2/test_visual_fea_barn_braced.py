@@ -181,6 +181,41 @@ girt_brace_right_3 = create_brace_for_girt(
 ).shape
 girt_braces.append(("girt_brace_right_3", girt_brace_right_3))
 
+# Braces from bent 2 (middle) posts - both directions
+# Toward bent 1 (-Y direction)
+girt_brace_left_2a = create_brace_for_girt(
+    post=bents[1]["left_post"], girt=left_girt,
+    brace_section=BRACE_SECTION,
+    distance_from_post=BRACE_DIST_FROM_POST,
+    at_girt_start=True,  # Toward -Y (bent 1)
+).shape
+girt_braces.append(("girt_brace_left_2a", girt_brace_left_2a))
+
+girt_brace_right_2a = create_brace_for_girt(
+    post=bents[1]["right_post"], girt=right_girt,
+    brace_section=BRACE_SECTION,
+    distance_from_post=BRACE_DIST_FROM_POST,
+    at_girt_start=True,  # Toward -Y (bent 1)
+).shape
+girt_braces.append(("girt_brace_right_2a", girt_brace_right_2a))
+
+# Toward bent 3 (+Y direction)
+girt_brace_left_2b = create_brace_for_girt(
+    post=bents[1]["left_post"], girt=left_girt,
+    brace_section=BRACE_SECTION,
+    distance_from_post=BRACE_DIST_FROM_POST,
+    at_girt_start=False,  # Toward +Y (bent 3)
+).shape
+girt_braces.append(("girt_brace_left_2b", girt_brace_left_2b))
+
+girt_brace_right_2b = create_brace_for_girt(
+    post=bents[1]["right_post"], girt=right_girt,
+    brace_section=BRACE_SECTION,
+    distance_from_post=BRACE_DIST_FROM_POST,
+    at_girt_start=False,  # Toward +Y (bent 3)
+).shape
+girt_braces.append(("girt_brace_right_2b", girt_brace_right_2b))
+
 
 # %%
 # Visualize the geometry
@@ -201,10 +236,14 @@ for name, brace in girt_braces:
 
 from ocp_vscode import show_object
 for part, part_name in all_parts:
-    if "Brace" in part_name or "brace" in part_name:
-        show_object(part, name=part_name, options={"alpha": 0.7, "color": "orange"})
+    if "brace" in part_name.lower():
+        show_object(part, name=part_name, options={"color": "orange"})
     elif "Girt" in part_name:
-        show_object(part, name=part_name, options={"alpha": 0.5})
+        show_object(part, name=part_name, options={"color": "burlywood", "alpha": 0.3})
+    elif "Beam" in part_name:
+        show_object(part, name=part_name, options={"color": "burlywood", "alpha": 0.3})
+    elif "Post" in part_name:
+        show_object(part, name=part_name, options={"color": "sienna", "alpha": 0.3})
     else:
         show_object(part, name=part_name)
 

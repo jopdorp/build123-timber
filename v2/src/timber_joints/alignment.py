@@ -483,6 +483,9 @@ def create_brace_for_girt(
     brace_section: float,
     distance_from_post: float = 300.0,
     at_girt_start: bool = True,
+    tenon_width: float = None,
+    tenon_height: float = None,
+    tenon_length: float = 60.0,
 ) -> PositionedBrace:
     """Create and position a brace between a post and girt.
     
@@ -497,11 +500,15 @@ def create_brace_for_girt(
         distance_from_post: Distance from post inside face for brace bottom connection  
         at_girt_start: If True, brace at girt start (toward -Y)
                        If False, brace at girt end (toward +Y)
+        tenon_width: Width of tenon (default: brace_section / 3)
+        tenon_height: Height of tenon (default: brace_section * 2/3)
+        tenon_length: Length of tenon projection (default: 60mm)
     
     Returns:
         PositionedBrace with shape, angle, position info for tenon cuts
     """
     from timber_joints.beam import Beam
+    from timber_joints.brace_tenon import BraceTenon
     
     post_bbox = post.bounding_box()
     girt_bbox = girt.bounding_box()
@@ -522,6 +529,33 @@ def create_brace_for_girt(
     # Create the brace
     brace_beam = Beam(length=brace_length, width=brace_section, height=brace_section)
     brace = brace_beam.shape
+    
+    # Apply tenon cuts BEFORE rotation (while brace is axis-aligned)
+    if tenon_width is None:
+        tenon_width = brace_section / 3
+    if tenon_height is None:
+        tenon_height = brace_section * 2 / 3
+    
+    # Cut tenon at post end (start of brace)
+    brace_with_post_tenon = BraceTenon(
+        brace=brace,
+        tenon_width=tenon_width,
+        tenon_height=tenon_height,
+        tenon_length=tenon_length,
+        brace_angle=angle,
+        at_start=True,
+    )
+    
+    # Cut tenon at girt end (end of brace)
+    brace_with_both_tenons = BraceTenon(
+        brace=brace_with_post_tenon.shape,
+        tenon_width=tenon_width,
+        tenon_height=tenon_height,
+        tenon_length=tenon_length,
+        brace_angle=angle,
+        at_start=False,
+    )
+    brace = brace_with_both_tenons.shape
     
     # Rotate brace:
     # 1. First rotate 90° around Z to align with Y axis (now runs from Y=0 to Y=length)
