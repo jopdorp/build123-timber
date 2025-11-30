@@ -378,34 +378,37 @@ def _create_brace(
     # Set up tenon dimensions
     if tenon_width is None:
         tenon_width = brace_section / 3
-    if tenon_height is None:
-        tenon_height = brace_section * 2 / 3
     
     # Create the brace WITH tenon cuts first (to get rotated_cut_bbox_height for positioning)
     brace_for_cuts = Beam(length=brace_length, width=brace_section, height=brace_section).shape
     
-    # Cut tenon at post end (start of brace)
+    # Determine which end of the brace connects to what:
+    # - at_member_start=True: brace goes from post (at start of brace) to member (at end of brace)
+    # - at_member_start=False: brace goes from member (at start of brace) to post (at end of brace)
+    post_tenon_at_start = at_member_start
+    member_tenon_at_start = not at_member_start
+    
+    # Cut tenon at post end
     brace_with_post_tenon = BraceTenon(
         brace=brace_for_cuts,
         tenon_width=tenon_width,
-        tenon_height=tenon_height,
         tenon_length=tenon_length,
         brace_angle=angle,
-        at_start=True,
+        at_start=post_tenon_at_start,
     )
     
-    # Cut tenon at member end (end of brace)
+    # Cut tenon at member end
     brace_with_both_tenons = BraceTenon(
         brace=brace_with_post_tenon.shape,
         tenon_width=tenon_width,
-        tenon_height=tenon_height,
         tenon_length=tenon_length,
         brace_angle=angle,
-        at_start=False,
+        at_start=member_tenon_at_start,
     )
     brace_with_cuts = brace_with_both_tenons.shape
     
-    # Get the penetration depth from the tenon cut (how far tenon tip extends when tilted)
+    # Get the penetration depth from the MEMBER tenon (how far tenon tip extends when tilted)
+    # This is the vertical penetration into the horizontal member
     penetration_depth = brace_with_both_tenons.rotated_cut_bbox_height
     
     # Brace bounding box top aligns with member bottom, then penetrates by tenon projection
@@ -425,6 +428,11 @@ def _create_brace(
     
     # Use the ORIGINAL brace bbox (no tenon cuts) for positioning
     rot_bbox = rotated_brace.bounding_box()
+    
+    # Get the cut brace rotated for positioning (needed for left brace correction)
+    brace_with_cuts_rotated = brace_with_cuts.rotate(Axis.Z, 90) if axis == Axis.Y else brace_with_cuts
+    brace_with_cuts_rotated = brace_with_cuts_rotated.rotate(tilt_axis, angle_sign * angle)
+    cut_bbox = brace_with_cuts_rotated.bounding_box()
     
     # Calculate positioning along the brace axis
     # Align brace bounding box edge with the post inside face, then penetrate by tenon projection
@@ -458,15 +466,16 @@ def _create_brace(
         # Center on X (same as post)
         target_x = post_center_x - (rot_bbox.min.X + rot_bbox.max.X) / 2
     
-    target_z = target_top_z - rot_bbox.max.Z
+    # For Z positioning, use the original brace bbox with correction for left brace
+    if at_member_start:
+        # Left brace needs quarter correction
+        z_correction = rot_bbox.max.Z - cut_bbox.max.Z
+        target_z = target_top_z - rot_bbox.max.Z + z_correction / 4
+    else:
+        target_z = target_top_z - rot_bbox.max.Z
     
-    # Apply same rotations to the brace with cuts
-    if axis == Axis.Y:
-        brace_with_cuts = brace_with_cuts.rotate(Axis.Z, 90)
-    brace_with_cuts = brace_with_cuts.rotate(tilt_axis, angle_sign * angle)
-    
-    # Position using the offset calculated from the original bbox
-    positioned_shape = brace_with_cuts.move(Location((target_x, target_y, target_z)))
+    # Position the rotated cut brace
+    positioned_shape = brace_with_cuts_rotated.move(Location((target_x, target_y, target_z)))
     return PositionedBrace(
         shape=positioned_shape,
         angle=angle,
