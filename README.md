@@ -200,7 +200,9 @@ timber_joints/
 
 **📚 [Read the full documentation on GitHub Pages →](https://jopdorp.github.io/build123-timber/)**
 
-Full API documentation is available in the `docs/` directory. Build it locally:
+Documentation is automatically built and deployed to GitHub Pages on every push to main.
+
+To build locally:
 
 ```bash
 pip install -e ".[docs]"
@@ -209,20 +211,15 @@ make html
 # Open docs/_build/html/index.html in browser
 ```
 
-Documentation is automatically rebuilt and deployed to GitHub Pages on push to main.
-
-To build locally, documentation is also automatically rebuilt before each git push via pre-push hook. Set up hooks:
-
-```bash
-./.githooks/setup-hooks.sh
-```
-
 ## Examples
 
-See the `examples/` directory:
-- `barn_frame.py` - Complete barn frame assembly
-- `fea_pipeline.py` - Structural analysis workflow
-- `compas_pipeline_example.py` - COMPAS integration
+See the `examples/` directory for complete working examples:
+- `fea_barn_frame.py` - 3-bent barn frame with FEA analysis
+- `fea_barn_with_braces.py` - Barn frame with knee braces
+- `fea_single_bent.py` - Single bent frame FEA
+- `joint_cuts_gallery.py` - All joint cut types
+- `alignment_joints_demo.py` - Joint alignment scenarios
+- `brace_tenon_cuts.py` - Brace tenon cuts at various angles
 
 ## Contributing
 
