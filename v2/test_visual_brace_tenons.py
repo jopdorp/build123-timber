@@ -29,13 +29,11 @@ def test_brace_tenon_45_degrees():
     brace = Beam(length=brace_length, width=brace_section, height=brace_section)
     
     tenon_width = brace_section / 3
-    tenon_height = brace_section * 2 / 3
     tenon_length = 60
     
     brace_with_tenon = BraceTenon(
         brace=brace.shape,
         tenon_width=tenon_width,
-        tenon_height=tenon_height,
         tenon_length=tenon_length,
         brace_angle=45,
         at_start=False,
@@ -57,13 +55,11 @@ def test_brace_tenon_30_degrees():
     brace = Beam(length=brace_length, width=brace_section, height=brace_section)
     
     tenon_width = brace_section / 3
-    tenon_height = brace_section * 2 / 3
     tenon_length = 60
     
     brace_with_tenon = BraceTenon(
         brace=brace.shape,
         tenon_width=tenon_width,
-        tenon_height=tenon_height,
         tenon_length=tenon_length,
         brace_angle=30,
         at_start=False,
@@ -86,13 +82,11 @@ def test_brace_tenon_60_degrees():
     brace = Beam(length=brace_length, width=brace_section, height=brace_section)
     
     tenon_width = brace_section / 3
-    tenon_height = brace_section * 2 / 3
     tenon_length = 60
     
     brace_with_tenon = BraceTenon(
         brace=brace.shape,
         tenon_width=tenon_width,
-        tenon_height=tenon_height,
         tenon_length=tenon_length,
         brace_angle=60,
         at_start=True,
@@ -115,13 +109,11 @@ def test_brace_tenon_at_start():
     brace = Beam(length=brace_length, width=brace_section, height=brace_section)
     
     tenon_width = brace_section / 3
-    tenon_height = brace_section * 2 / 3
     tenon_length = 60
     
     brace_with_tenon = BraceTenon(
         brace=brace.shape,
         tenon_width=tenon_width,
-        tenon_height=tenon_height,
         tenon_length=tenon_length,
         brace_angle=45,
         at_start=True,
@@ -144,14 +136,12 @@ def test_brace_both_tenons():
     brace = Beam(length=brace_length, width=brace_section, height=brace_section)
     
     tenon_width = brace_section / 3
-    tenon_height = brace_section * 2 / 3
     tenon_length = 60
     
     # First apply bottom tenon (post end)
     brace_with_bottom = BraceTenon(
         brace=brace.shape,
         tenon_width=tenon_width,
-        tenon_height=tenon_height,
         tenon_length=tenon_length,
         brace_angle=45,
         at_start=True,
@@ -161,7 +151,6 @@ def test_brace_both_tenons():
     brace_with_both = BraceTenon(
         brace=brace_with_bottom.shape,
         tenon_width=tenon_width,
-        tenon_height=tenon_height,
         tenon_length=tenon_length,
         brace_angle=45,
         at_start=False,
