@@ -2,7 +2,7 @@
 
 import math
 from dataclasses import dataclass
-from build123d import Location, Axis, Part
+from build123d import Location, Axis, Part, Plane
 
 
 
@@ -337,6 +337,11 @@ def _create_brace(
     brace penetrating into the horizontal member until the lower corner of the brace
     end touches the member bottom surface.
     
+    The unified approach:
+    1. Create brace with tenons (always post tenon at start, member tenon at end)
+    2. Rotate to Y-axis if needed, then tilt at +/-angle based on orientation
+    3. Position using ONE formula that references the correct bbox corner
+    
     Args:
         post: The vertical post Part (already positioned)
         horizontal_member: The horizontal beam/girt Part (already positioned)
@@ -371,24 +376,26 @@ def _create_brace(
     # Calculate actual brace length
     brace_length = calculate_brace_length(horizontal_dist, vertical_dist)
     
-    # Create the brace (without tenon cuts first - we'll use this bbox for positioning)
-    brace_beam = Beam(length=brace_length, width=brace_section, height=brace_section)
-    brace = brace_beam.shape
-    
     # Set up tenon dimensions
     if tenon_width is None:
         tenon_width = brace_section / 3
     
-    # Create the brace WITH tenon cuts first (to get rotated_cut_bbox_height for positioning)
+    # === UNIFIED APPROACH ===
+    # Create brace with tenons: positions depend on which end connects to what
+    # - at_member_start=True: post at start of brace, member at end
+    # - at_member_start=False: member at start of brace, post at end
+    
+    # Create brace WITHOUT cuts first (for positioning reference)
+    brace_no_cuts = Beam(length=brace_length, width=brace_section, height=brace_section).shape
+    
+    # Also create brace WITH cuts
     brace_for_cuts = Beam(length=brace_length, width=brace_section, height=brace_section).shape
     
-    # Determine which end of the brace connects to what:
-    # - at_member_start=True: brace goes from post (at start of brace) to member (at end of brace)
-    # - at_member_start=False: brace goes from member (at start of brace) to post (at end of brace)
+    # Determine tenon positions based on brace orientation
     post_tenon_at_start = at_member_start
     member_tenon_at_start = not at_member_start
     
-    # Cut tenon at post end
+    # Cut post tenon
     brace_with_post_tenon = BraceTenon(
         brace=brace_for_cuts,
         tenon_width=tenon_width,
@@ -397,7 +404,7 @@ def _create_brace(
         at_start=post_tenon_at_start,
     )
     
-    # Cut tenon at member end
+    # Cut member tenon
     brace_with_both_tenons = BraceTenon(
         brace=brace_with_post_tenon.shape,
         tenon_width=tenon_width,
@@ -407,77 +414,67 @@ def _create_brace(
     )
     brace_with_cuts = brace_with_both_tenons.shape
     
-    # Get the penetration depth from the MEMBER tenon (how far tenon tip extends when tilted)
-    # This is the vertical penetration into the horizontal member
-    penetration_depth = brace_with_both_tenons.rotated_cut_bbox_height
-    
-    # Brace bounding box top aligns with member bottom, then penetrates by tenon projection
-    target_top_z = member_bbox.min.Z + penetration_depth
+    # Get penetration depths from tenon cuts
+    vertical_penetration = brace_with_both_tenons.rotated_cut_bbox_height
+    horizontal_penetration = brace_with_post_tenon.rotated_cut_bbox_width
     
     # Determine rotation axis for tilting (perpendicular to brace direction)
-    # X-axis brace tilts around Y; Y-axis brace tilts around X
     tilt_axis = Axis.Y if axis == Axis.X else Axis.X
     
     # For Y-axis braces, first rotate 90° around Z to align with Y axis
     if axis == Axis.Y:
-        brace = brace.rotate(Axis.Z, 90)
+        brace_no_cuts = brace_no_cuts.rotate(Axis.Z, 90)
+        brace_with_cuts = brace_with_cuts.rotate(Axis.Z, 90)
     
-    # Determine sign for angle based on which end of the member the brace is at
+    # Angle sign: +angle tilts up-right (for at_member_start=False)
+    #            -angle tilts up-left (for at_member_start=True)
     angle_sign = -1 if at_member_start else 1
-    rotated_brace = brace.rotate(tilt_axis, angle_sign * angle)
+    rotated_brace_no_cuts = brace_no_cuts.rotate(tilt_axis, angle_sign * angle)
+    rotated_brace_with_cuts = brace_with_cuts.rotate(tilt_axis, angle_sign * angle)
     
-    # Use the ORIGINAL brace bbox (no tenon cuts) for positioning
-    rot_bbox = rotated_brace.bounding_box()
+    # Use brace WITHOUT cuts for positioning (consistent bbox)
+    rot_bbox = rotated_brace_no_cuts.bounding_box()
+    # Use brace WITH cuts for the actual shape and for correction calculation
+    cut_bbox = rotated_brace_with_cuts.bounding_box()
     
-    # Get the cut brace rotated for positioning (needed for left brace correction)
-    brace_with_cuts_rotated = brace_with_cuts.rotate(Axis.Z, 90) if axis == Axis.Y else brace_with_cuts
-    brace_with_cuts_rotated = brace_with_cuts_rotated.rotate(tilt_axis, angle_sign * angle)
-    cut_bbox = brace_with_cuts_rotated.bounding_box()
+    # Target Z: brace top aligns with member bottom + penetration
+    target_top_z = member_bbox.min.Z + vertical_penetration
     
-    # Calculate positioning along the brace axis
-    # Align brace bounding box edge with the post inside face, then penetrate by tenon projection
-    # Horizontal penetration from the post tenon (cos component of tenon length)
-    horizontal_penetration = brace_with_post_tenon.rotated_cut_bbox_width
-    
-    if axis == Axis.X:
-        # Position along X axis
-        if at_member_start:
-            # Brace at beam start - post is on the left, brace penetrates into post
-            post_inside = post_bbox.max.X
-            target_x = post_inside - rot_bbox.min.X - horizontal_penetration
-        else:
-            # Brace at beam end - post is on the right, brace penetrates into post
-            post_inside = post_bbox.min.X
-            target_x = post_inside - rot_bbox.max.X + horizontal_penetration
-        
-        # Center on Y (same as post)
-        target_y = post_center_y - (rot_bbox.min.Y + rot_bbox.max.Y) / 2
-    else:  # axis == Axis.Y
-        # Position along Y axis
-        if at_member_start:
-            # Brace toward -Y - post is on the +Y side, brace penetrates into post
-            post_inside = post_bbox.min.Y
-            target_y = post_inside - rot_bbox.max.Y + horizontal_penetration
-        else:
-            # Brace toward +Y - post is on the -Y side, brace penetrates into post
-            post_inside = post_bbox.max.Y
-            target_y = post_inside - rot_bbox.min.Y - horizontal_penetration
-        
-        # Center on X (same as post)
-        target_x = post_center_x - (rot_bbox.min.X + rot_bbox.max.X) / 2
-    
-    # For Z positioning, use the original brace bbox with correction for left brace
+    # Z positioning uses the no-cuts bbox, with correction for left brace
     if at_member_start:
-        # Left brace needs quarter correction
+        # Left brace needs quarter correction due to asymmetric tenon cut effects
         z_correction = rot_bbox.max.Z - cut_bbox.max.Z
         target_z = target_top_z - rot_bbox.max.Z + z_correction / 4
     else:
         target_z = target_top_z - rot_bbox.max.Z
     
-    # Position the rotated cut brace
-    positioned_shape = brace_with_cuts_rotated.move(Location((target_x, target_y, target_z)))
+    # Position along the brace axis - reference correct bbox edge based on orientation
+    if axis == Axis.X:
+        if at_member_start:
+            # Brace tilts up-left, post on left side - use bbox.min.X
+            post_inside = post_bbox.max.X
+            target_x = post_inside - rot_bbox.min.X - horizontal_penetration
+        else:
+            # Brace tilts up-right, post on right side - use bbox.max.X
+            post_inside = post_bbox.min.X
+            target_x = post_inside - rot_bbox.max.X + horizontal_penetration
+        target_y = post_center_y - (rot_bbox.min.Y + rot_bbox.max.Y) / 2
+    else:  # axis == Axis.Y
+        if at_member_start:
+            # Brace toward -Y, post on +Y side - use bbox.max.Y
+            post_inside = post_bbox.min.Y
+            target_y = post_inside - rot_bbox.max.Y + horizontal_penetration
+        else:
+            # Brace toward +Y, post on -Y side - use bbox.min.Y
+            post_inside = post_bbox.max.Y
+            target_y = post_inside - rot_bbox.min.Y - horizontal_penetration
+        target_x = post_center_x - (rot_bbox.min.X + rot_bbox.max.X) / 2
+    
+    # Position the cut brace using the calculated targets
+    positioned_brace = rotated_brace_with_cuts.move(Location((target_x, target_y, target_z)))
+    
     return PositionedBrace(
-        shape=positioned_shape,
+        shape=positioned_brace,
         angle=angle,
         at_beam_end=not at_member_start,
         brace_section=brace_section,
