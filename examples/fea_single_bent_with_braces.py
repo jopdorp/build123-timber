@@ -55,6 +55,8 @@ visualize_frame_with_mesh(
     cad_offset=0,
     mesh_offset=-500,
     contact_offset=500,
+    element_size=100.0,       # Finer mesh for better accuracy
+    element_size_fine=30.0,   # Finer contact refinement
 )
 
 # %%
@@ -64,16 +66,17 @@ mid_x = (beam_bbox.min.X + beam_bbox.max.X) / 2
 top_z = beam_bbox.max.Z
 
 def main_load_filter(nid, x, y, z, part, mesh):
+    # Small area load at beam midspan top - ~50mm x 50mm patch
     return (part == "beam" and 
-            abs(x - mid_x) < 70.0 and 
-            abs(z - top_z) < 35.0)
+            abs(x - mid_x) < 25.0 and 
+            abs(z - top_z) < 25.0)
 
-main_load = LoadBC("main_load", main_load_filter, dof=3, total_load=-9810.0)  # 1 tonne down
+main_load = LoadBC("main_load", main_load_filter, dof=3, total_load=-50000.0)  # 5 tonne down
 
 output_dir = Path(__file__).parent / "fea_single_bent_braced_output"
 
 print("Loads:")
-print("  - Main load: 1000 kg (1 tonne) at beam midspan")
+print("  - Main load: 5000 kg (5 tonne) at beam midspan")
 print("  - Self-weight: automatic")
 print()
 
@@ -82,13 +85,13 @@ result = run_fea_analysis(
     output_dir,
     title="SINGLE BENT FRAME FEA ANALYSIS (WITH BRACES)",
     additional_loads=[main_load],
-    reference_length=5000.0,  # beam span
+    reference_length=5000.0  # beam span
 )
 
 # %%
 # Visualize FEA results with limit-based colormap
 # - Displacement limit: 5000/300 = 16.7mm (L/300)
 # - Stress limit: 24 MPa (C24 f_m_k)
-visualize_fea_results(result, output_dir, cad_shapes, scale=5.0, reference_length=5000.0)
+visualize_fea_results(result, output_dir, cad_shapes, scale=1.0, reference_length=5000.0)
 
 # %%

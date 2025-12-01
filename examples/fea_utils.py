@@ -152,20 +152,19 @@ def run_fea_analysis(
     output_dir: Path,
     title: str,
     additional_loads: Optional[List[LoadBC]] = None,
-    mesh_size: float = 150.0,
-    mesh_size_fine: float = 40.0,
     reference_length: Optional[float] = None,
     verbose: bool = True,
 ):
     """Run FEA analysis and print results.
+    
+    Note: Frame should be pre-meshed via visualize_frame_with_mesh() or frame.mesh() 
+    before calling this. Mesh sizes are specified there, not here.
     
     Args:
         frame: TimberFrame with members added (and optionally pre-meshed)
         output_dir: Directory for output files
         title: Title for the analysis printout
         additional_loads: Optional list of LoadBC objects
-        mesh_size: Base mesh element size
-        mesh_size_fine: Fine mesh size at contacts
         reference_length: Reference length for L/300 check (e.g., beam span)
         verbose: Print progress
         
@@ -181,8 +180,6 @@ def run_fea_analysis(
     result = frame.analyze(
         additional_loads=additional_loads or [],
         output_dir=output_dir,
-        mesh_size=mesh_size,
-        mesh_size_fine=mesh_size_fine,
         verbose=verbose,
     )
     

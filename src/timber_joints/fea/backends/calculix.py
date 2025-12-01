@@ -503,6 +503,9 @@ class CalculiXBackend(BaseSolverBackend):
             problem, config, meshing_result.meshes, meshing_result.combined, verbose
         )
         
+        # Save load information for visualization
+        self._save_load_info(problem, meshing_result.combined, bc_node_lists, output_dir)
+        
         # Generate CalculiX input
         input_file = self._generate_input(
             problem, config, meshing_result.combined, meshing_result.contact_surfaces, 
@@ -556,6 +559,50 @@ class CalculiXBackend(BaseSolverBackend):
                 print(f"  BC '{bc.name}': {len(nodes)} nodes")
         
         return bc_node_lists
+    
+    def _save_load_info(
+        self,
+        problem: AnalysisProblem,
+        combined: CombinedMesh,
+        bc_node_lists: Dict[str, List[int]],
+        output_dir: Path,
+    ):
+        """Save load positions and directions for visualization."""
+        import json
+        
+        loads = []
+        for bc in problem.load_bcs:
+            nodes = bc_node_lists.get(bc.name, [])
+            if not nodes:
+                continue
+            
+            # Calculate centroid of load application
+            coords = [combined.nodes[nid] for nid in nodes if nid in combined.nodes]
+            if not coords:
+                continue
+            
+            centroid = (
+                sum(c[0] for c in coords) / len(coords),
+                sum(c[1] for c in coords) / len(coords),
+                sum(c[2] for c in coords) / len(coords),
+            )
+            
+            # Direction based on DOF (1=X, 2=Y, 3=Z)
+            direction = [0.0, 0.0, 0.0]
+            direction[bc.dof - 1] = 1.0 if bc.total_load > 0 else -1.0
+            
+            loads.append({
+                "name": bc.name,
+                "position": list(centroid),
+                "direction": direction,
+                "magnitude": abs(bc.total_load),
+                "dof": bc.dof,
+                "total_load": bc.total_load,
+            })
+        
+        load_file = output_dir / "loads.json"
+        with open(load_file, 'w') as f:
+            json.dump(loads, f, indent=2)
     
     def _generate_input(
         self,

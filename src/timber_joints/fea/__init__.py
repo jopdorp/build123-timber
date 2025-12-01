@@ -142,6 +142,9 @@ from .visualization import (
     show_fea_results,
     show_fea_results_colormap,
     value_to_rainbow_color,
+    build_force_arrow,
+    read_load_info,
+    save_load_info,
 )
 
 # =============================================================================

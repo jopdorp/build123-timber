@@ -110,8 +110,6 @@ result = run_fea_analysis(
     title="3-BENT BARN FRAME FEA ANALYSIS (WITH BRACES)",
     additional_loads=additional_loads,
     reference_length=config.beam_length,
-    mesh_size=200.0,       # Coarser base mesh (was 150)
-    mesh_size_fine=60.0,   # Coarser contact refinement (was 40)
 )
 
 # %%

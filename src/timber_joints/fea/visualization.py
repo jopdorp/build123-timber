@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
+import json
 import numpy as np
 
 from OCP.BRepBuilderAPI import BRepBuilderAPI_MakePolygon, BRepBuilderAPI_MakeFace
@@ -9,7 +10,7 @@ from OCP.gp import gp_Pnt
 from OCP.BRep import BRep_Builder
 from OCP.TopoDS import TopoDS_Compound
 
-from build123d import Compound
+from build123d import Compound, Cylinder, Cone, Location, Rotation
 
 from .backends.calculix import read_frd_nodes, read_frd_displacements, read_frd_stresses, compute_von_mises
 
@@ -25,15 +26,127 @@ C3D4_FACE_INDICES = [
 ]
 
 
+def build_force_arrow(
+    position: Tuple[float, float, float],
+    direction: Tuple[float, float, float],
+    magnitude: float,
+    arrow_length: float = 300.0,
+    shaft_radius: float = 15.0,
+    head_radius: float = 40.0,
+    head_length: float = 80.0,
+    offset: float = 50.0,
+) -> Compound:
+    """Build a 3D arrow representing a force vector.
+    
+    Arrow points in the direction of the force, with tip offset from the position
+    so the arrow body is outside the material.
+    
+    Args:
+        position: (x, y, z) point where force is applied
+        direction: (dx, dy, dz) force direction (will be normalized)
+        magnitude: Force magnitude (N) - used for scaling
+        arrow_length: Total arrow length in mm
+        shaft_radius: Radius of arrow shaft
+        head_radius: Radius of arrow head base
+        head_length: Length of arrow head cone
+        offset: Distance to offset arrow tip from position (away from surface)
+        
+    Returns:
+        Compound containing shaft cylinder and head cone
+    """
+    from build123d import Cylinder, Cone, Location
+    from build123d import Compound, Part, Align, Axis
+    
+    # Normalize direction
+    dx, dy, dz = direction
+    length = np.sqrt(dx**2 + dy**2 + dz**2)
+    if length < 1e-10:
+        return None
+    dx, dy, dz = dx/length, dy/length, dz/length
+    
+    # Create shaft (cylinder along Z axis, then rotate)
+    shaft_length = arrow_length - head_length
+    shaft = Cylinder(shaft_radius, shaft_length, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    
+    # Create head (cone)
+    head = Cone(head_radius, 0, head_length, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    head = head.move(Location((0, 0, shaft_length)))
+    
+    # Combine into compound
+    arrow = Part() + shaft + head
+    
+    # Calculate rotation to align Z axis with direction vector
+    # Default arrow points in +Z direction
+    # Need to rotate to point in (dx, dy, dz) direction
+    
+    # Calculate rotation angles
+    # First rotate around Y to get X-Z plane alignment, then around X for final direction
+    xy_length = np.sqrt(dx**2 + dy**2)
+    
+    if xy_length > 1e-10:
+        # Angle from Z axis (elevation)
+        elevation = np.degrees(np.arctan2(xy_length, dz))
+        # Angle in XY plane (azimuth)
+        azimuth = np.degrees(np.arctan2(dy, dx))
+        
+        # Apply rotations: first around Y by elevation, then around Z by azimuth
+        arrow = arrow.rotate(Axis.Y, elevation)
+        arrow = arrow.rotate(Axis.Z, azimuth)
+    elif dz < 0:
+        # Pointing in -Z direction
+        arrow = arrow.rotate(Axis.X, 180)
+    
+    # Offset position away from the surface along the force direction
+    # This ensures the arrow body is outside the material
+    offset_position = (
+        position[0] + offset * dx,
+        position[1] + offset * dy,
+        position[2] + offset * dz,
+    )
+    
+    # Move to offset position
+    arrow = arrow.move(Location(offset_position))
+    
+    return arrow
+
+
+def read_load_info(output_dir: Path) -> List[Dict]:
+    """Read load information from JSON file saved during analysis.
+    
+    Args:
+        output_dir: Directory containing loads.json
+        
+    Returns:
+        List of dicts with keys: name, position, direction, magnitude
+    """
+    load_file = output_dir / "loads.json"
+    if not load_file.exists():
+        return []
+    
+    with open(load_file, 'r') as f:
+        return json.load(f)
+
+
+def save_load_info(output_dir: Path, loads: List[Dict]):
+    """Save load information to JSON file for visualization.
+    
+    Args:
+        output_dir: Directory to save loads.json
+        loads: List of dicts with keys: name, position, direction, magnitude
+    """
+    load_file = output_dir / "loads.json"
+    with open(load_file, 'w') as f:
+        json.dump(loads, f, indent=2)
+
+
 def value_to_limit_color(value: float, limit: float) -> str:
     """Convert a value to a color based on fraction of allowable limit.
     
-    Color scheme (engineering standard):
+    Continuous 24-bit color scheme:
     - 0-50% of limit: Blue → Cyan (safe)
     - 50-80% of limit: Cyan → Green (acceptable)
-    - 80-100% of limit: Green → Yellow → Orange (warning)
-    - 100-120% of limit: Orange → Red (exceeded)
-    - >120% of limit: Magenta/Purple (critical failure)
+    - 80-100% of limit: Green → Red (warning to limit)
+    - >100% of limit: Red → Dark Purple (exceeded)
     
     Args:
         value: The actual value
@@ -57,17 +170,18 @@ def value_to_limit_color(value: float, limit: float) -> str:
         t = (ratio - 0.5) / 0.3
         r, g, b = 0, 255, int(255 * (1 - t))
     elif ratio <= 1.0:
-        # Green (80%) to Yellow (100%) - warning zone starts
+        # Green (80%) to Red (100%) - warning to limit, 100% = RED
         t = (ratio - 0.8) / 0.2
-        r, g, b = int(255 * t), 255, 0
-    elif ratio <= 1.2:
-        # Yellow (100%) to Red (120%) - limit exceeded
-        t = (ratio - 1.0) / 0.2
-        r, g, b = 255, int(255 * (1 - t)), 0
+        r = int(255 * t)
+        g = int(255 * (1 - t))
+        b = 0
     else:
-        # Red (120%) to Magenta (150%+) - critical
-        t = min(1.0, (ratio - 1.2) / 0.3)
-        r, g, b = 255, 0, int(255 * t)
+        # Red (100%) to Dark Purple (200%+) - exceeded
+        t = min(1.0, (ratio - 1.0) / 1.0)  # Full purple at 200%
+        # Fade from red (255, 0, 0) to dark purple (80, 0, 80)
+        r = int(255 - 175 * t)
+        g = 0
+        b = int(80 * t)
     
     return f"#{r:02X}{g:02X}{b:02X}"
 
@@ -92,11 +206,12 @@ def get_limit_color_bands(limit: float, n_bands: int = 2048) -> List[Tuple[float
         color = value_to_limit_color(mid, limit)
         bands.append((lower, upper, color))
     
-    # Bands above limit (100-150%): 1/3 of total bands
+    # Bands above limit (100-300%): 1/3 of total bands
+    # Goes to 300% so we can see the full red-to-purple gradient
     n_above = n_bands - n_below
     for i in range(n_above):
-        lower = limit * (1.0 + 0.5 * i / n_above)
-        upper = limit * (1.0 + 0.5 * (i + 1) / n_above)
+        lower = limit * (1.0 + 2.0 * i / n_above)
+        upper = limit * (1.0 + 2.0 * (i + 1) / n_above)
         mid = (lower + upper) / 2
         color = value_to_limit_color(mid, limit)
         bands.append((lower, upper, color))
@@ -515,11 +630,13 @@ def show_fea_results_colormap(
     original_alpha: float = 0.3,
     show_displacement: bool = True,
     show_stress: bool = True,
+    show_loads: bool = True,
     displacement_offset: Tuple[float, float, float] = (0, 0, 0),
     stress_offset: Tuple[float, float, float] = (8000, 0, 0),
     displacement_limit: Optional[float] = None,
     stress_limit: Optional[float] = None,
     reference_length: Optional[float] = None,
+    arrow_scale: float = 1.0,
 ):
     """Visualize FEA results with limit-based colormaps for displacement and stress.
     
@@ -538,11 +655,13 @@ def show_fea_results_colormap(
         original_alpha: Transparency for original shapes
         show_displacement: Show displacement colormap
         show_stress: Show stress colormap
+        show_loads: Show force arrows at load application points
         displacement_offset: (x, y, z) offset for displacement visualization
         stress_offset: (x, y, z) offset for stress visualization
         displacement_limit: Allowable displacement (mm). If None, uses reference_length/300
         stress_limit: Allowable stress (MPa). If None, uses 24 MPa (C24 bending strength)
         reference_length: Reference length for L/300 displacement limit (mm)
+        arrow_scale: Scale factor for force arrows (1.0 = default size)
         
     Returns:
         Dict with visualization info including max values and limit checks
@@ -628,11 +747,10 @@ def show_fea_results_colormap(
         print()
     
     print(f"COLOR LEGEND:")
-    print(f"  Blue/Cyan:  0-50% of limit (safe)")
-    print(f"  Green:      50-80% of limit (acceptable)")
-    print(f"  Yellow:     80-100% of limit (warning)")
-    print(f"  Red:        100-120% of limit (EXCEEDED)")
-    print(f"  Magenta:    >120% of limit (CRITICAL)")
+    print(f"  Blue→Cyan:        0-50% of limit (safe)")
+    print(f"  Cyan→Green:       50-80% of limit (acceptable)")
+    print(f"  Green→Red:        80-100% of limit (warning)")
+    print(f"  Red→Dark Purple:  100-200%+ of limit (EXCEEDED)")
     print(f"{'='*60}")
     
     # Collect all objects to show
@@ -675,6 +793,51 @@ def show_fea_results_colormap(
                 f"Stress {pct_min:.0f}-{pct_max:.0f}%",
                 {"color": color}
             ))
+    
+    # Load force arrows
+    if show_loads:
+        output_dir = Path(mesh_file).parent
+        loads = read_load_info(output_dir)
+        
+        # Filter out self-weight loads (they have "_sw_" in name)
+        custom_loads = [l for l in loads if "_sw_" not in l["name"]]
+        
+        for load in custom_loads:
+            pos = tuple(load["position"])
+            direction = tuple(load["direction"])
+            magnitude = load["magnitude"]
+            
+            # Scale arrow size based on magnitude (larger loads = bigger arrows)
+            # Use log scale to prevent huge differences
+            base_length = 300 * arrow_scale
+            
+            arrow = build_force_arrow(
+                position=pos,
+                direction=direction,
+                magnitude=magnitude,
+                arrow_length=base_length,
+                shaft_radius=15 * arrow_scale,
+                head_radius=40 * arrow_scale,
+                head_length=80 * arrow_scale,
+            )
+            
+            if arrow:
+                # Add arrows to displacement view (center)
+                arrow_disp = arrow.move(Location(displacement_offset))
+                objects_to_show.append((
+                    arrow_disp,
+                    f"Load: {load['name']} ({magnitude:.0f}N)",
+                    {"color": "red"}
+                ))
+                
+                # Add arrows to stress view (right)
+                if show_stress:
+                    arrow_stress = arrow.move(Location(stress_offset))
+                    objects_to_show.append((
+                        arrow_stress,
+                        f"Load: {load['name']}",
+                        {"color": "red"}
+                    ))
     
     # Show all objects
     shapes = [obj for obj, name, opts in objects_to_show]

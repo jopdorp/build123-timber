@@ -39,6 +39,7 @@ from .backends.calculix import (
     read_frd_stresses,
     compute_von_mises,
 )
+from .visualization import save_load_info
 from .solver import (
     ContactParameters,
     StepConfig,
@@ -175,6 +176,50 @@ class AssemblyResult:
 
 
 # =============================================================================
+# Helper Functions
+# =============================================================================
+
+def _save_load_info_for_visualization(
+    load_bcs: List[LoadBC],
+    combined: CombinedMesh,
+    bc_node_lists: Dict[str, List[int]],
+    output_dir: Path,
+) -> None:
+    """Save load positions and directions for visualization (force arrows)."""
+    loads = []
+    for bc in load_bcs:
+        nodes = bc_node_lists.get(bc.name, [])
+        if not nodes:
+            continue
+        
+        # Calculate centroid of load application
+        coords = [combined.nodes[nid] for nid in nodes if nid in combined.nodes]
+        if not coords:
+            continue
+        
+        centroid = (
+            sum(c[0] for c in coords) / len(coords),
+            sum(c[1] for c in coords) / len(coords),
+            sum(c[2] for c in coords) / len(coords),
+        )
+        
+        # Direction based on DOF (1=X, 2=Y, 3=Z)
+        direction = [0.0, 0.0, 0.0]
+        direction[bc.dof - 1] = 1.0 if bc.total_load > 0 else -1.0
+        
+        loads.append({
+            "name": bc.name,
+            "position": list(centroid),
+            "direction": direction,
+            "magnitude": abs(bc.total_load),
+            "dof": bc.dof,
+            "total_load": bc.total_load,
+        })
+    
+    save_load_info(output_dir, loads)
+
+
+# =============================================================================
 # Generic Analysis Pipeline
 # =============================================================================
 
@@ -259,6 +304,9 @@ def analyze_assembly(
         bc_node_lists[bc.name] = nodes
         if verbose:
             print(f"  BC '{bc.name}': {len(nodes)} nodes")
+    
+    # Save load information for visualization (force arrows)
+    _save_load_info_for_visualization(load_bcs, combined, bc_node_lists, output_dir)
     
     # Build CalculiX input
     ccx = CalculiXInput()

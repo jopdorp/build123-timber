@@ -101,6 +101,7 @@ Thumbs.db
 *.inp
 *.sta
 *.out
+loads.json
 
 # IFC files
 *.ifc
