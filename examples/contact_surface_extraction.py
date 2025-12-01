@@ -11,15 +11,12 @@ from timber_joints.alignment import build_complete_bent
 from timber_joints.analysis import find_joint_contact_surfaces, scale_shape_in_place
 
 # Build bent and downscale beam to create gap for contact analysis
-left_post, right_post, beam_positioned, _ = build_complete_bent(
+bent = build_complete_bent(
     post_height=3000,
     post_section=150,
     beam_length=5000,
-    tenon_length=60,
-    shoulder_depth=20,
-    housing_depth=20,
-    post_top_extension=300,
 )
+left_post, right_post, beam_positioned = bent.left_post, bent.right_post, bent.beam
 
 beam_with_gap = scale_shape_in_place(beam_positioned, 1 - 1e-6)
 
@@ -61,15 +58,12 @@ print(f"Right joint: tenon {len(right_tenon.faces())} faces ({right_tenon_area:.
 from timber_joints.analysis import expand_shape_by_margin
 
 # Build a fresh bent
-left_post2, right_post2, beam_positioned2, _ = build_complete_bent(
+bent2 = build_complete_bent(
     post_height=3000,
     post_section=150,
     beam_length=5000,
-    tenon_length=60,
-    shoulder_depth=20,
-    housing_depth=20,
-    post_top_extension=300,
 )
+left_post2, right_post2, beam_positioned2 = bent2.left_post, bent2.right_post, bent2.beam
 
 # Shrink beam by 0.5mm on each side using expand_shape_by_margin with negative margin
 beam_with_gap2 = expand_shape_by_margin(beam_positioned2, -0.5)
@@ -118,15 +112,12 @@ from timber_joints.alignment import build_complete_bent
 from timber_joints.analysis import expand_shape_by_margin, find_mesh_contact_faces
 
 # Build a fresh bent
-left_post3, right_post3, beam_positioned3, _ = build_complete_bent(
+bent3 = build_complete_bent(
     post_height=3000,
     post_section=150,
     beam_length=5000,
-    tenon_length=60,
-    shoulder_depth=20,
-    housing_depth=20,
-    post_top_extension=300,
 )
+left_post3, right_post3, beam_positioned3 = bent3.left_post, bent3.right_post, bent3.beam
 
 beam_with_gap3 = expand_shape_by_margin(beam_positioned3, -0.5)
 

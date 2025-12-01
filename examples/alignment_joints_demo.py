@@ -537,38 +537,33 @@ show_object(beam_with_both_tenons.move(Location((-1200, 0, 1200))), name="Beam w
 
 from ocp_vscode import show_object
 from build123d import Location
-from timber_joints.alignment import build_complete_bent
+from timber_joints.alignment import build_complete_bent, JointParams
 
 # Build the complete bent using the utility function
 post_height = 3000
 post_section = 150
 beam_length = 5000
-tenon_length = 60
-shoulder_depth = 20
-housing_depth = 20
-post_top_extension = 300
 
-left_post_with_mortise, right_post_with_mortise, positioned_beam, beam = build_complete_bent(
+# Use JointParams with defaults (or customize)
+joint_params = JointParams()
+
+bent = build_complete_bent(
     post_height=post_height,
     post_section=post_section,
     beam_length=beam_length,
-    tenon_length=tenon_length,
-    shoulder_depth=shoulder_depth,
-    housing_depth=housing_depth,
-    post_top_extension=post_top_extension,
+    joint_params=joint_params,
 )
 
-# Tenon dimensions for display
-tenon_width = beam.width / 3
-tenon_height = beam.height * 2 / 3
+# Tenon dimensions from JointParams
+tenon_width, tenon_height = joint_params.get_tenon_dimensions(post_section)
 
 print("=== 7. Complete Bent - Two Posts with Beam ===")
 print(f"Post height: {post_height}mm, section: {post_section}mm")
 print(f"Beam length: {beam_length}mm")
-print(f"Tenon: {tenon_length}L × {tenon_width:.1f}W × {tenon_height:.1f}H")
+print(f"Tenon: {joint_params.tenon_length}L × {tenon_width:.1f}W × {tenon_height:.1f}H")
 
-show_object(left_post_with_mortise.move(Location((-1200, 1800, 1200))), name="Left Post", options={"color": "sienna", "alpha": 0.7})
-show_object(right_post_with_mortise.move(Location((-1200, 1800, 1200))), name="Right Post", options={"color": "sienna", "alpha": 0.7})
-show_object(positioned_beam.move(Location((-1200, 1800, 1200))), name="Beam with Both Tenons", options={"color": "burlywood"})
+show_object(bent.left_post.move(Location((-1200, 1800, 1200))), name="Left Post", options={"color": "sienna", "alpha": 0.7})
+show_object(bent.right_post.move(Location((-1200, 1800, 1200))), name="Right Post", options={"color": "sienna", "alpha": 0.7})
+show_object(bent.beam.move(Location((-1200, 1800, 1200))), name="Beam with Both Tenons", options={"color": "burlywood"})
 
 # %%

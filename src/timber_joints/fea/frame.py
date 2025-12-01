@@ -9,7 +9,7 @@ import copy
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from typing import List, Optional, Callable
+from typing import List, Optional, Callable, Tuple
 
 from build123d import Part
 
@@ -27,7 +27,6 @@ from .calculix import (
     BEAM_HORIZONTAL_X,
     POST_VERTICAL_Z,
 )
-
 
 class MemberType(Enum):
     """Type of structural member based on orientation."""
@@ -257,6 +256,92 @@ class TimberFrame:
             b1.max.Y + margin < b2.min.Y or b2.max.Y + margin < b1.min.Y or
             b1.max.Z + margin < b2.min.Z or b2.max.Z + margin < b1.min.Z
         )
+    
+    def get_mesh_geometry(self, mesh_size: float = 50.0) -> List[Tuple[str, "Compound"]]:
+        """Get mesh geometry for all members as visualizable Compounds.
+        
+        Args:
+            mesh_size: Mesh element size
+            
+        Returns:
+            List of tuples: (name, mesh_compound)
+        """
+        from timber_joints.analysis import build_mesh_faces_compound
+        from .meshing import mesh_part, get_boundary_faces
+        from pathlib import Path
+        import tempfile
+        from build123d import export_step
+        
+        results = []
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for member in self.members:
+                step_path = Path(tmpdir) / f"{member.name}.step"
+                export_step(member.shape, str(step_path))
+                mesh = mesh_part(str(step_path), member.name, mesh_size)
+                
+                elems = [(i + 1, e) for i, e in enumerate(mesh.elements)]
+                boundary_faces = get_boundary_faces(elems)
+                mesh_compound = build_mesh_faces_compound(boundary_faces, elems, mesh.nodes)
+                results.append((member.name, mesh_compound))
+        
+        return results
+    
+    def get_contact_surfaces(self, mesh_size: float = 50.0) -> List[Tuple[str, str, "Compound", "Compound"]]:
+        """Get mesh contact surfaces for all detected member pairs.
+        
+        Meshes the parts and finds contact faces using mesh bounding box intersection.
+        Returns visualizable Compound objects built from the mesh triangles.
+        
+        Args:
+            mesh_size: Mesh element size for contact detection
+            
+        Returns:
+            List of tuples: (name_a, name_b, surface_a, surface_b)
+        """
+        from timber_joints.analysis import find_mesh_contact_faces, build_mesh_faces_compound
+        from .meshing import mesh_part
+        from pathlib import Path
+        import tempfile
+        from build123d import export_step
+        
+        contacts = self._find_contacts()
+        if not contacts:
+            return []
+        
+        # Export and mesh all parts
+        with tempfile.TemporaryDirectory() as tmpdir:
+            step_files = {}
+            meshes = {}
+            
+            for member in self.members:
+                step_path = Path(tmpdir) / f"{member.name}.step"
+                export_step(member.shape, str(step_path))
+                step_files[member.name] = str(step_path)
+                meshes[member.name] = mesh_part(str(step_path), member.name, mesh_size)
+            
+            results = []
+            for name_a, name_b in contacts:
+                mesh_a = meshes[name_a]
+                mesh_b = meshes[name_b]
+                
+                elems_a = [(i + 1, e) for i, e in enumerate(mesh_a.elements)]
+                elems_b = [(i + 1, e) for i, e in enumerate(mesh_b.elements)]
+                
+                try:
+                    faces_a, faces_b = find_mesh_contact_faces(
+                        elems_a, mesh_a.nodes,
+                        elems_b, mesh_b.nodes,
+                        margin=mesh_size + self.contact_gap
+                    )
+                    
+                    surface_a = build_mesh_faces_compound(faces_a, elems_a, mesh_a.nodes)
+                    surface_b = build_mesh_faces_compound(faces_b, elems_b, mesh_b.nodes)
+                    results.append((name_a, name_b, surface_a, surface_b))
+                except Exception:
+                    pass
+            
+            return results
     
     def analyze(
         self,

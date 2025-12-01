@@ -13,6 +13,7 @@ from timber_joints.alignment import (
     calculate_brace_angle,
     calculate_brace_length,
     build_complete_bent,
+    JointParams,
 )
 from pathlib import Path
 from ocp_vscode import reset_show, show_object
@@ -107,17 +108,25 @@ def test_single_brace():
 
 def test_bent_with_braces():
     """Test creating a complete bent with braces on both posts."""
-    # Build a bent
-    left_post, right_post, beam, _ = build_complete_bent(
-        post_height=3000,
-        post_section=150,
-        beam_length=5000,
-        beam_section=150,
+    # Build a bent using the new API with JointParams
+    joint_params = JointParams(
         tenon_length=60,
         shoulder_depth=20,
         housing_depth=20,
         post_top_extension=300,
     )
+    
+    result = build_complete_bent(
+        post_height=3000,
+        post_section=150,
+        beam_length=5000,
+        beam_section=150,
+        joint_params=joint_params,
+    )
+    
+    left_post = result.left_post
+    right_post = result.right_post
+    beam = result.beam
     
     # Create braces on both ends (using default penetration = corner touches beam bottom)
     brace_left_result = create_brace_for_bent(

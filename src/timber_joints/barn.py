@@ -8,17 +8,16 @@ A barn frame consists of:
 
 from dataclasses import dataclass, field
 from typing import Optional
-from build123d import Part, Location, Axis
+from build123d import Part, Location
 
-from timber_joints.beam import Beam
-from timber_joints.tenon import Tenon
 from timber_joints.alignment import (
+    BraceParams,
+    JointParams,
+    BentResult,
+    GirtResult,
     build_complete_bent,
-    create_receiving_cut,
-    create_brace_for_bent,
-    create_brace_for_girt,
+    add_girts_to_bents,
 )
-from timber_joints.utils import create_vertical_cut
 
 
 @dataclass
@@ -87,17 +86,76 @@ class BarnConfig:
     @property
     def girt_length(self) -> float:
         return (self.num_bents - 1) * self.bent_spacing + self.post_section
+    
+    def get_joint_params(self) -> JointParams:
+        """Convert to JointParams for alignment utilities."""
+        return JointParams(
+            tenon_length=self.tenon_length,
+            shoulder_depth=self.shoulder_depth,
+            housing_depth=self.housing_depth,
+            post_top_extension=self.post_top_extension,
+        )
+    
+    def get_bent_brace_params(self) -> Optional[BraceParams]:
+        """Get BraceParams for bent braces, or None if disabled."""
+        if not self.include_bent_braces or not self.bent_brace_section:
+            return None
+        return BraceParams(
+            section=self.bent_brace_section,
+            length=self.bent_brace_length,
+            angle=self.bent_brace_angle,
+            tenon_length=self.tenon_length,
+        )
+    
+    def get_girt_brace_params(self) -> Optional[BraceParams]:
+        """Get BraceParams for girt braces, or None if disabled."""
+        if not self.include_girt_braces or not self.girt_brace_section:
+            return None
+        return BraceParams(
+            section=self.girt_brace_section,
+            length=self.girt_brace_length,
+            angle=self.girt_brace_angle,
+            tenon_length=self.tenon_length,
+        )
 
 
 @dataclass
 class Bent:
-    """A single bent (portal frame) with optional braces."""
-    left_post: Part
-    right_post: Part
-    beam: Part
-    brace_left: Optional[Part] = None
-    brace_right: Optional[Part] = None
+    """A single bent (portal frame) with optional braces.
+    
+    This wraps BentResult with Y position information for barn assembly.
+    """
+    result: BentResult
     y_position: float = 0
+    
+    @property
+    def left_post(self) -> Part:
+        """Left post at Y position."""
+        return self.result.left_post.move(Location((0, self.y_position, 0)))
+    
+    @property
+    def right_post(self) -> Part:
+        """Right post at Y position."""
+        return self.result.right_post.move(Location((0, self.y_position, 0)))
+    
+    @property
+    def beam(self) -> Part:
+        """Beam at Y position."""
+        return self.result.beam.move(Location((0, self.y_position, 0)))
+    
+    @property
+    def brace_left(self) -> Optional[Part]:
+        """Left brace at Y position, or None."""
+        if self.result.brace_left is None:
+            return None
+        return self.result.brace_left.move(Location((0, self.y_position, 0)))
+    
+    @property
+    def brace_right(self) -> Optional[Part]:
+        """Right brace at Y position, or None."""
+        if self.result.brace_right is None:
+            return None
+        return self.result.brace_right.move(Location((0, self.y_position, 0)))
 
 
 @dataclass
@@ -112,174 +170,69 @@ class BarnFrame:
     """
     config: BarnConfig
     bents: list[Bent] = field(default_factory=list)
-    left_girt: Optional[Part] = None
-    right_girt: Optional[Part] = None
-    girt_braces: list[tuple[str, Part]] = field(default_factory=list)
+    girt_result: Optional[GirtResult] = None
+    
+    @property
+    def left_girt(self) -> Optional[Part]:
+        """Left girt, or None if not built."""
+        return self.girt_result.left_girt if self.girt_result else None
+    
+    @property
+    def right_girt(self) -> Optional[Part]:
+        """Right girt, or None if not built."""
+        return self.girt_result.right_girt if self.girt_result else None
+    
+    @property
+    def girt_braces(self) -> list[tuple[str, Part]]:
+        """List of (name, part) tuples for girt braces."""
+        return self.girt_result.braces if self.girt_result else []
     
     @classmethod
     def build(cls, config: BarnConfig) -> "BarnFrame":
+        """Build a complete barn frame from configuration."""
         barn = cls(config=config)
         barn._build_bents()
         if config.include_girts:
             barn._build_girts()
-        if config.include_girt_braces and config.girt_brace_section:
-            barn._build_girt_braces()
         return barn
     
     def _build_bents(self):
+        """Build all bents using build_complete_bent utility."""
         config = self.config
-        
-        # Tenon dimensions for post tops (if girts are used)
-        post_tenon_x = config.post_section * 2 / 3
-        post_tenon_y = config.post_section / 3
+        joint_params = config.get_joint_params()
+        brace_params = config.get_bent_brace_params()
         
         for i in range(config.num_bents):
             bent_y = i * config.bent_spacing
             
-            # Build the bent
-            left_post, right_post, beam, _ = build_complete_bent(
+            # Create bent with optional braces
+            bent_result = build_complete_bent(
                 post_height=config.post_height,
                 post_section=config.post_section,
                 beam_length=config.beam_length,
                 beam_section=config.beam_section,
-                tenon_length=config.tenon_length,
-                shoulder_depth=config.shoulder_depth,
-                housing_depth=config.housing_depth,
-                post_top_extension=config.post_top_extension,
+                joint_params=joint_params,
+                brace_params=brace_params,
             )
             
-            # Add tenons to post tops if we're including girts
-            if config.include_girts:
-                left_post = create_vertical_cut(
-                    left_post, Tenon, at_top=True,
-                    tenon_width=post_tenon_x, tenon_height=post_tenon_y,
-                    tenon_length=config.tenon_length,
-                )
-                right_post = create_vertical_cut(
-                    right_post, Tenon, at_top=True,
-                    tenon_width=post_tenon_x, tenon_height=post_tenon_y,
-                    tenon_length=config.tenon_length,
-                )
-            
-            # Create braces if requested
-            brace_left = None
-            brace_right = None
-            if config.include_bent_braces and config.bent_brace_section:
-                brace_left = create_brace_for_bent(
-                    post=left_post, beam=beam,
-                    brace_section=config.bent_brace_section,
-                    brace_length=config.bent_brace_length,
-                    angle=config.bent_brace_angle,
-                    at_beam_start=True,
-                ).shape
-                brace_right = create_brace_for_bent(
-                    post=right_post, beam=beam,
-                    brace_section=config.bent_brace_section,
-                    brace_length=config.bent_brace_length,
-                    angle=config.bent_brace_angle,
-                    at_beam_start=False,
-                ).shape
-            
-            # Move all parts to Y position
-            left_post = left_post.move(Location((0, bent_y, 0)))
-            right_post = right_post.move(Location((0, bent_y, 0)))
-            beam = beam.move(Location((0, bent_y, 0)))
-            if brace_left:
-                brace_left = brace_left.move(Location((0, bent_y, 0)))
-            if brace_right:
-                brace_right = brace_right.move(Location((0, bent_y, 0)))
-            
-            self.bents.append(Bent(
-                left_post=left_post,
-                right_post=right_post,
-                beam=beam,
-                brace_left=brace_left,
-                brace_right=brace_right,
-                y_position=bent_y,
-            ))
+            self.bents.append(Bent(result=bent_result, y_position=bent_y))
     
     def _build_girts(self):
+        """Build girts connecting all bents using add_girts_to_bents utility."""
         config = self.config
         
-        # Get post X positions from first bent
-        first_bent = self.bents[0]
-        left_bbox = first_bent.left_post.bounding_box()
-        right_bbox = first_bent.right_post.bounding_box()
-        left_post_x = (left_bbox.min.X + left_bbox.max.X) / 2
-        right_post_x = (right_bbox.min.X + right_bbox.max.X) / 2
+        # Collect bent results and Y positions
+        bent_results = [bent.result for bent in self.bents]
+        y_positions = [bent.y_position for bent in self.bents]
         
-        # Z position for girts (at top of posts, minus tenon/housing)
-        girt_z = left_bbox.max.Z - config.tenon_length - config.housing_depth
-        
-        # Create left girt
-        left_girt_beam = Beam(length=config.girt_length, width=config.girt_section, height=config.girt_section)
-        left_girt = left_girt_beam.shape.rotate(Axis.Z, 90)
-        left_girt_bbox = left_girt.bounding_box()
-        left_girt = left_girt.move(Location((
-            left_post_x - (left_girt_bbox.min.X + left_girt_bbox.max.X) / 2,
-            -left_girt_bbox.min.Y,
-            girt_z - left_girt_bbox.min.Z,
-        )))
-        
-        # Create right girt
-        right_girt_beam = Beam(length=config.girt_length, width=config.girt_section, height=config.girt_section)
-        right_girt = right_girt_beam.shape.rotate(Axis.Z, 90)
-        right_girt_bbox = right_girt.bounding_box()
-        right_girt = right_girt.move(Location((
-            right_post_x - (right_girt_bbox.min.X + right_girt_bbox.max.X) / 2,
-            -right_girt_bbox.min.Y,
-            girt_z - right_girt_bbox.min.Z,
-        )))
-        
-        # Cut mortises in girts for each bent's posts
-        for bent in self.bents:
-            left_girt = create_receiving_cut(bent.left_post, left_girt)
-            right_girt = create_receiving_cut(bent.right_post, right_girt)
-        
-        self.left_girt = left_girt
-        self.right_girt = right_girt
-    
-    def _build_girt_braces(self):
-        if not self.left_girt or not self.right_girt:
-            return
-        
-        config = self.config
-        
-        for i, bent in enumerate(self.bents):
-            # First bent: braces toward +Y only
-            if i == 0:
-                self._add_girt_brace(bent, toward_plus_y=True, index=i)
-            # Last bent: braces toward -Y only
-            elif i == config.num_bents - 1:
-                self._add_girt_brace(bent, toward_plus_y=False, index=i)
-            # Middle bents: braces both directions
-            else:
-                self._add_girt_brace(bent, toward_plus_y=True, index=i, suffix="a")
-                self._add_girt_brace(bent, toward_plus_y=False, index=i, suffix="b")
-    
-    def _add_girt_brace(self, bent: Bent, toward_plus_y: bool, index: int, suffix: str = ""):
-        config = self.config
-        at_girt_start = not toward_plus_y  # at_girt_start=True means toward -Y
-        
-        # Left side brace
-        left_brace = create_brace_for_girt(
-            post=bent.left_post, girt=self.left_girt,
-            brace_section=config.girt_brace_section,
-            brace_length=config.girt_brace_length,
-            angle=config.girt_brace_angle,
-            at_girt_start=at_girt_start,
-        ).shape
-        self.girt_braces.append((f"girt_brace_left_{index+1}{suffix}", left_brace))
-        
-        # Right side brace
-        right_brace = create_brace_for_girt(
-            post=bent.right_post, girt=self.right_girt,
-            brace_section=config.girt_brace_section,
-            brace_length=config.girt_brace_length,
-            angle=config.girt_brace_angle,
-            at_girt_start=at_girt_start,
-        ).shape
-        self.girt_braces.append((f"girt_brace_right_{index+1}{suffix}", right_brace))
+        # Build girts with optional braces
+        self.girt_result = add_girts_to_bents(
+            bents=bent_results,
+            y_positions=y_positions,
+            girt_section=config.girt_section,
+            joint_params=config.get_joint_params(),
+            brace_params=config.get_girt_brace_params(),
+        )
     
     def all_parts(self) -> list[tuple[Part, str]]:
         parts = []

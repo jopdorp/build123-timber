@@ -1,21 +1,92 @@
 """Alignment utilities for positioning timber joints."""
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional, List, Type, TYPE_CHECKING
 from build123d import Location, Axis, Part, Plane
 
+if TYPE_CHECKING:
+    from timber_joints.base_joint import BaseJoint
+
+
+@dataclass
+class JointParams:
+    """Configuration for mortise-tenon joints (default: ShoulderedTenon)."""
+    joint_class: Optional[Type["BaseJoint"]] = None
+    tenon_length: float = 60.0
+    tenon_width_ratio: float = 1/3      # Tenon width as fraction of beam width
+    tenon_height_ratio: float = 2/3     # Tenon height as fraction of beam height
+    shoulder_depth: float = 20.0
+    housing_depth: float = 20.0
+    post_top_extension: float = 300.0
+    
+    def get_joint_class(self):
+        if self.joint_class is None:
+            from timber_joints.shouldered_tenon import ShoulderedTenon
+            return ShoulderedTenon
+        return self.joint_class
+    
+    def get_tenon_dimensions(self, beam_width: float, beam_height: float) -> tuple[float, float]:
+        """Calculate tenon width and height from beam dimensions."""
+        return beam_width * self.tenon_width_ratio, beam_height * self.tenon_height_ratio
+
+
+@dataclass
+class BraceParams:
+    """Configuration for knee braces (default joint: BraceTenon)."""
+    section: float = 100.0
+    length: float = 707.0
+    angle: float = 45.0
+    tenon_length: float = 60.0
+    post_joint_class: Optional[Type["BaseJoint"]] = None
+    beam_joint_class: Optional[Type["BaseJoint"]] = None
+    
+    def get_post_joint_class(self):
+        if self.post_joint_class is None:
+            from timber_joints.brace_tenon import BraceTenon
+            return BraceTenon
+        return self.post_joint_class
+    
+    def get_beam_joint_class(self):
+        if self.beam_joint_class is None:
+            from timber_joints.brace_tenon import BraceTenon
+            return BraceTenon
+        return self.beam_joint_class
+
+
+@dataclass
+class BentResult:
+    """Result from creating a bent (portal frame)."""
+    left_post: Part
+    right_post: Part
+    beam: Part
+    brace_left: Optional[Part] = None
+    brace_right: Optional[Part] = None
+    
+    # Dimensions for reference
+    post_section: float = 0.0
+    beam_section: float = 0.0
+    beam_length: float = 0.0
+
+
+@dataclass
+class GirtResult:
+    """Result from adding girts to bents."""
+    left_girt: Part
+    right_girt: Part
+    braces: List[tuple[str, Part]] = field(default_factory=list)
 
 
 @dataclass
 class PositionedBrace:
-    """A brace with its positioning and angle information.
+    """A brace with its positioning and cut receiving members.
     
-    Stores the brace Part along with the angle needed for specialized tenon cuts:
-    - One face aligned with the brace angle
-    - Another face perpendicular to the post/beam/girt (90°)
-    - The tip aligned with the post/beam/girt surface
+    Stores the brace Part along with the post and horizontal member
+    that have had mortises cut for the brace tenons.
     """
     shape: Part
+    post: Part  # Post with mortise cut
+    horizontal_member: Part  # Beam/girt with mortise cut
     angle: float  # degrees from horizontal
     at_beam_end: bool  # True = right/end side, False = left/start side
     brace_section: float
@@ -377,8 +448,14 @@ def _create_brace(
     # Position the cut brace using the calculated targets
     positioned_brace = rotated_brace_with_cuts.move(Location((target_x, target_y, target_z)))
     
+    # Cut mortises in receiving members
+    post_with_mortise = create_receiving_cut(positioned_brace, post)
+    member_with_mortise = create_receiving_cut(positioned_brace, horizontal_member)
+    
     return PositionedBrace(
         shape=positioned_brace,
+        post=post_with_mortise,
+        horizontal_member=member_with_mortise,
         angle=angle,
         at_beam_end=not at_member_start,
         brace_section=brace_section,
@@ -447,46 +524,45 @@ def  build_complete_bent(
     post_section: float = 150,
     beam_length: float = 5000,
     beam_section: float = None,
-    tenon_length: float = 60,
-    shoulder_depth: float = 20,
-    housing_depth: float = 20,
-    post_top_extension: float = 300,
-) -> tuple[Part, Part, Part, "Beam"]:
-    """Build a complete bent (two posts + beam) with shouldered tenon joints.
-    
-    Returns (left_post, right_post, positioned_beam, original_beam).
-    """
+    joint_params: JointParams = None,
+    brace_params: BraceParams = None,
+) -> BentResult:
+    """Build a bent (two posts + beam) with optional braces."""
     from timber_joints.beam import Beam
-    from timber_joints.shouldered_tenon import ShoulderedTenon
+    
+    if joint_params is None:
+        joint_params = JointParams()
     
     beam_section = beam_section or post_section
+    
+    # Get the joint class for post/beam connection
+    JointClass = joint_params.get_joint_class()
     
     # Create posts and beam
     post_left = Beam(length=post_height, width=post_section, height=post_section)
     post_right = Beam(length=post_height, width=post_section, height=post_section)
     beam = Beam(length=beam_length, width=beam_section, height=beam_section)
     
-    # Tenon dimensions: 1/3 width, 2/3 height
-    tenon_width = beam.width / 3
-    tenon_height = beam.height * 2 / 3
+    # Tenon dimensions from joint params
+    tenon_width, tenon_height = joint_params.get_tenon_dimensions(beam.width, beam.height)
     drop_depth = beam.height
     
-    # Create beam with tenons on BOTH ends
-    beam_with_start = ShoulderedTenon(
+    # Create beam with tenons on BOTH ends using the configured joint class
+    beam_with_start = JointClass(
         beam=beam,
         tenon_width=tenon_width,
         tenon_height=tenon_height,
-        tenon_length=tenon_length,
-        shoulder_depth=shoulder_depth,
+        tenon_length=joint_params.tenon_length,
+        shoulder_depth=joint_params.shoulder_depth,
         at_start=True,
     ).shape
 
-    beam_with_both_tenons = ShoulderedTenon(
+    beam_with_both_tenons = JointClass(
         beam=beam_with_start,
         tenon_width=tenon_width,
         tenon_height=tenon_height,
-        tenon_length=tenon_length,
-        shoulder_depth=shoulder_depth,
+        tenon_length=joint_params.tenon_length,
+        shoulder_depth=joint_params.shoulder_depth,
         at_start=False,
     ).shape
     
@@ -507,9 +583,9 @@ def  build_complete_bent(
     beam_for_left_cut, _ = position_for_blind_mortise(
         beam=positioned_beam,
         post=vertical_post_left,
-        tenon_length=tenon_length,
-        housing_depth=housing_depth,
-        post_top_extension=post_top_extension,
+        tenon_length=joint_params.tenon_length,
+        housing_depth=joint_params.housing_depth,
+        post_top_extension=joint_params.post_top_extension,
         at_start=True,
     )
     left_post_with_mortise = create_receiving_cut(beam_for_left_cut, vertical_post_left)
@@ -527,12 +603,202 @@ def  build_complete_bent(
     _, positioned_post_right_cut = position_for_blind_mortise(
         beam=positioned_beam,
         post=positioned_post_right,
-        tenon_length=tenon_length,
-        housing_depth=housing_depth,
-        post_top_extension=post_top_extension,
+        tenon_length=joint_params.tenon_length,
+        housing_depth=joint_params.housing_depth,
+        post_top_extension=joint_params.post_top_extension,
         at_start=False,
         move_post=True,
     )
     right_post_with_mortise = create_receiving_cut(positioned_beam, positioned_post_right_cut)
     
-    return left_post_with_mortise, right_post_with_mortise, positioned_beam, beam
+    left_post = left_post_with_mortise
+    right_post = right_post_with_mortise
+    beam = positioned_beam
+    
+    # Add braces if requested
+    brace_left = None
+    brace_right = None
+    if brace_params is not None:
+        left_brace_result = create_brace_for_bent(
+            post=left_post, beam=beam,
+            brace_section=brace_params.section,
+            brace_length=brace_params.length,
+            angle=brace_params.angle,
+            tenon_length=brace_params.tenon_length,
+            at_beam_start=True,
+        )
+        brace_left = left_brace_result.shape
+        left_post = left_brace_result.post
+        beam = left_brace_result.horizontal_member
+        
+        right_brace_result = create_brace_for_bent(
+            post=right_post, beam=beam,
+            brace_section=brace_params.section,
+            brace_length=brace_params.length,
+            angle=brace_params.angle,
+            tenon_length=brace_params.tenon_length,
+            at_beam_start=False,
+        )
+        brace_right = right_brace_result.shape
+        right_post = right_brace_result.post
+        beam = right_brace_result.horizontal_member
+    
+    return BentResult(
+        left_post=left_post,
+        right_post=right_post,
+        beam=beam,
+        brace_left=brace_left,
+        brace_right=brace_right,
+        post_section=post_section,
+        beam_section=beam_section,
+        beam_length=beam_length,
+    )
+
+
+def add_girts_to_bents(
+    bents: List[BentResult],
+    y_positions: List[float],
+    girt_section: float = None,
+    joint_params: JointParams = None,
+    brace_params: BraceParams = None,
+) -> GirtResult:
+    """Connect bents with longitudinal girts and optional braces."""
+    from timber_joints.beam import Beam
+    from timber_joints.tenon import Tenon
+    from timber_joints.utils import create_vertical_cut
+    
+    if len(bents) < 2:
+        raise ValueError("Need at least 2 bents to add girts")
+    if len(bents) != len(y_positions):
+        raise ValueError("Number of bents must match number of y_positions")
+    
+    if joint_params is None:
+        joint_params = JointParams()
+    
+    # Use first bent's dimensions as reference
+    first_bent = bents[0]
+    if girt_section is None:
+        girt_section = first_bent.post_section
+    
+    # Add tenons to post tops for girt connection
+    post_section = first_bent.post_section
+    tenon_width, tenon_height = joint_params.get_tenon_dimensions(post_section, post_section)
+    
+    updated_bents = []
+    for bent in bents:
+        left_post = create_vertical_cut(
+            bent.left_post, Tenon, at_top=True,
+            tenon_width=tenon_width, tenon_height=tenon_height,
+            tenon_length=joint_params.tenon_length,
+        )
+        right_post = create_vertical_cut(
+            bent.right_post, Tenon, at_top=True,
+            tenon_width=tenon_width, tenon_height=tenon_height,
+            tenon_length=joint_params.tenon_length,
+        )
+        updated_bents.append(BentResult(
+            left_post=left_post,
+            right_post=right_post,
+            beam=bent.beam,
+            brace_left=bent.brace_left,
+            brace_right=bent.brace_right,
+            post_section=bent.post_section,
+            beam_section=bent.beam_section,
+            beam_length=bent.beam_length,
+        ))
+    bents = updated_bents
+    
+    # Calculate girt length from bent positions
+    y_min = min(y_positions)
+    y_max = max(y_positions)
+    girt_length = (y_max - y_min) + first_bent.post_section
+    
+    # Get post positions from first bent (moved to y=0 reference)
+    left_bbox = first_bent.left_post.bounding_box()
+    right_bbox = first_bent.right_post.bounding_box()
+    left_post_x = (left_bbox.min.X + left_bbox.max.X) / 2
+    right_post_x = (right_bbox.min.X + right_bbox.max.X) / 2
+    
+    # Z position for girts (at top of posts, accounting for tenon/housing)
+    girt_z = left_bbox.max.Z - joint_params.tenon_length - joint_params.housing_depth
+    
+    # Create and position left girt
+    left_girt_beam = Beam(length=girt_length, width=girt_section, height=girt_section)
+    left_girt = left_girt_beam.shape.rotate(Axis.Z, 90)
+    left_girt_bbox = left_girt.bounding_box()
+    left_girt = left_girt.move(Location((
+        left_post_x - (left_girt_bbox.min.X + left_girt_bbox.max.X) / 2,
+        y_min - left_girt_bbox.min.Y,
+        girt_z - left_girt_bbox.min.Z,
+    )))
+    
+    # Create and position right girt
+    right_girt_beam = Beam(length=girt_length, width=girt_section, height=girt_section)
+    right_girt = right_girt_beam.shape.rotate(Axis.Z, 90)
+    right_girt_bbox = right_girt.bounding_box()
+    right_girt = right_girt.move(Location((
+        right_post_x - (right_girt_bbox.min.X + right_girt_bbox.max.X) / 2,
+        y_min - right_girt_bbox.min.Y,
+        girt_z - right_girt_bbox.min.Z,
+    )))
+    
+    # Cut mortises in girts for each bent's posts
+    for bent, y_pos in zip(bents, y_positions):
+        # Move bent posts to their Y position for the cut
+        left_post_at_y = bent.left_post.move(Location((0, y_pos, 0)))
+        right_post_at_y = bent.right_post.move(Location((0, y_pos, 0)))
+        left_girt = create_receiving_cut(left_post_at_y, left_girt)
+        right_girt = create_receiving_cut(right_post_at_y, right_girt)
+    
+    # Add braces if requested
+    braces = []
+    if brace_params is not None:
+        num_bents = len(bents)
+        for i, (bent, y_pos) in enumerate(zip(bents, y_positions)):
+            # Move posts to Y position for brace creation
+            left_post_at_y = bent.left_post.move(Location((0, y_pos, 0)))
+            right_post_at_y = bent.right_post.move(Location((0, y_pos, 0)))
+            
+            # Determine brace directions based on position
+            # First bent: braces toward +Y only
+            # Last bent: braces toward -Y only
+            # Middle bents: both directions
+            if i == 0:
+                directions = [(True, "")]  # toward +Y
+            elif i == num_bents - 1:
+                directions = [(False, "")]  # toward -Y
+            else:
+                directions = [(True, "a"), (False, "b")]  # both
+            
+            for toward_plus_y, suffix in directions:
+                at_girt_start = not toward_plus_y
+                
+                # Left side brace
+                left_brace_result = create_brace_for_girt(
+                    post=left_post_at_y, girt=left_girt,
+                    brace_section=brace_params.section,
+                    brace_length=brace_params.length,
+                    angle=brace_params.angle,
+                    tenon_length=brace_params.tenon_length,
+                    at_girt_start=at_girt_start,
+                )
+                braces.append((f"girt_brace_left_{i+1}{suffix}", left_brace_result.shape))
+                left_girt = left_brace_result.horizontal_member
+                
+                # Right side brace
+                right_brace_result = create_brace_for_girt(
+                    post=right_post_at_y, girt=right_girt,
+                    brace_section=brace_params.section,
+                    brace_length=brace_params.length,
+                    angle=brace_params.angle,
+                    tenon_length=brace_params.tenon_length,
+                    at_girt_start=at_girt_start,
+                )
+                braces.append((f"girt_brace_right_{i+1}{suffix}", right_brace_result.shape))
+                right_girt = right_brace_result.horizontal_member
+    
+    return GirtResult(
+        left_girt=left_girt,
+        right_girt=right_girt,
+        braces=braces,
+    )
