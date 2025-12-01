@@ -250,6 +250,8 @@ def visualize_fea_results(
     use_colormap: bool = True,
     reference_length: Optional[float] = None,
     stress_limit: Optional[float] = None,
+    smooth_colors: bool = True,
+    subdivisions: int = 3,
 ):
     """Visualize FEA results with deformed shape and colormaps.
     
@@ -263,6 +265,8 @@ def visualize_fea_results(
         reference_length: Reference length for L/300 displacement limit (mm)
                          If None, auto-detected from geometry
         stress_limit: Allowable stress (MPa). If None, uses 24 MPa (C24 f_m_k)
+        smooth_colors: Use subdivision for smoother color gradients (default True)
+        subdivisions: Number of subdivisions per triangle edge (higher = smoother)
     """
     if result.success:
         if use_colormap:
@@ -278,6 +282,8 @@ def visualize_fea_results(
                 stress_offset=(8000, 0, 0),
                 reference_length=reference_length,
                 stress_limit=stress_limit,
+                smooth_colors=smooth_colors,
+                subdivisions=subdivisions,
             )
         else:
             show_fea_results(

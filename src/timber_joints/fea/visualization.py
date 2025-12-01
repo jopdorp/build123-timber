@@ -96,12 +96,16 @@ def build_force_arrow(
         # Pointing in -Z direction
         arrow = arrow.rotate(Axis.X, 180)
     
-    # Offset position away from the surface along the force direction
-    # This ensures the arrow body is outside the material
+    # Position the arrow so its TIP is near (but outside) the load application point
+    # The arrow is built from base at Z=0 to tip at Z=arrow_length
+    # After rotation, arrow base is at origin, tip points in force direction
+    # We want: tip near position, but offset away from surface
+    # So move base to: position - (arrow_length + offset) * direction
+    total_offset = arrow_length + offset
     offset_position = (
-        position[0] + offset * dx,
-        position[1] + offset * dy,
-        position[2] + offset * dz,
+        position[0] - total_offset * dx,
+        position[1] - total_offset * dy,
+        position[2] - total_offset * dz,
     )
     
     # Move to offset position
@@ -390,6 +394,176 @@ def build_triangle_compound(
     return Compound(compound)
 
 
+def subdivide_triangle(
+    p1: Tuple[float, float, float],
+    p2: Tuple[float, float, float],
+    p3: Tuple[float, float, float],
+    v1: float,
+    v2: float,
+    v3: float,
+    subdivisions: int = 2,
+) -> List[Tuple[Tuple[float, float, float], Tuple[float, float, float], Tuple[float, float, float], float]]:
+    """Subdivide a triangle into smaller triangles with interpolated values.
+    
+    Uses barycentric subdivision to create a finer mesh with smoothly
+    interpolated values at each sub-vertex.
+    
+    Args:
+        p1, p2, p3: Vertex coordinates
+        v1, v2, v3: Scalar values at each vertex
+        subdivisions: Number of subdivisions per edge (2 = 4 sub-triangles, 3 = 9, etc.)
+        
+    Returns:
+        List of (vertex1, vertex2, vertex3, avg_value) tuples for each sub-triangle
+    """
+    if subdivisions < 2:
+        # No subdivision - return original
+        avg = (v1 + v2 + v3) / 3
+        return [(p1, p2, p3, avg)]
+    
+    # Create grid of points using barycentric coordinates
+    # subdivisions = n means n+1 points per edge
+    n = subdivisions
+    points = {}  # (i, j) -> (x, y, z)
+    values = {}  # (i, j) -> value
+    
+    for i in range(n + 1):
+        for j in range(n + 1 - i):
+            k = n - i - j
+            # Barycentric coordinates
+            w1, w2, w3 = i / n, j / n, k / n
+            
+            # Interpolate position
+            x = w1 * p1[0] + w2 * p2[0] + w3 * p3[0]
+            y = w1 * p1[1] + w2 * p2[1] + w3 * p3[1]
+            z = w1 * p1[2] + w2 * p2[2] + w3 * p3[2]
+            points[(i, j)] = (x, y, z)
+            
+            # Interpolate value
+            values[(i, j)] = w1 * v1 + w2 * v2 + w3 * v3
+    
+    # Generate sub-triangles
+    result = []
+    for i in range(n):
+        for j in range(n - i):
+            # Upward-pointing triangle
+            pa = points[(i, j)]
+            pb = points[(i + 1, j)]
+            pc = points[(i, j + 1)]
+            va = values[(i, j)]
+            vb = values[(i + 1, j)]
+            vc = values[(i, j + 1)]
+            avg = (va + vb + vc) / 3
+            result.append((pa, pb, pc, avg))
+            
+            # Downward-pointing triangle (if exists)
+            if i + j + 1 < n:
+                pa = points[(i + 1, j)]
+                pb = points[(i + 1, j + 1)]
+                pc = points[(i, j + 1)]
+                va = values[(i + 1, j)]
+                vb = values[(i + 1, j + 1)]
+                vc = values[(i, j + 1)]
+                avg = (va + vb + vc) / 3
+                result.append((pa, pb, pc, avg))
+    
+    return result
+
+
+def build_smooth_colored_mesh(
+    faces: List[Tuple[int, int, int]],
+    nodes: Dict[int, Tuple[float, float, float]],
+    node_values: Dict[int, float],
+    limit: float,
+    subdivisions: int = 3,
+) -> List[Tuple[Compound, str, float, float]]:
+    """Build mesh compounds with smooth color interpolation using subdivision.
+    
+    Each mesh triangle is subdivided into smaller triangles, with values
+    interpolated across the face. This creates a smoother color gradient
+    than per-element coloring.
+    
+    Args:
+        faces: List of (n1, n2, n3) node ID tuples
+        nodes: Dict mapping node_id to (x, y, z) coordinates
+        node_values: Dict mapping node_id to scalar value
+        limit: Allowable limit value for color scaling
+        subdivisions: Number of subdivisions per edge (higher = smoother)
+        
+    Returns:
+        List of (compound, hex_color, band_min, band_max) tuples
+    """
+    bands = get_limit_color_bands(limit)
+    band_triangles = {i: [] for i in range(len(bands))}
+    
+    for face in faces:
+        n1, n2, n3 = face
+        if n1 not in nodes or n2 not in nodes or n3 not in nodes:
+            continue
+        
+        p1, p2, p3 = nodes[n1], nodes[n2], nodes[n3]
+        
+        # Get values at vertices (default to 0 if missing)
+        v1 = node_values.get(n1, 0.0)
+        v2 = node_values.get(n2, 0.0)
+        v3 = node_values.get(n3, 0.0)
+        
+        # Subdivide and get sub-triangles with interpolated values
+        sub_triangles = subdivide_triangle(p1, p2, p3, v1, v2, v3, subdivisions)
+        
+        # Assign each sub-triangle to a color band based on its average value
+        for pa, pb, pc, avg_val in sub_triangles:
+            # Find which band this value belongs to
+            assigned = False
+            for i, (lower, upper, color) in enumerate(bands):
+                if lower <= avg_val < upper:
+                    band_triangles[i].append((pa, pb, pc))
+                    assigned = True
+                    break
+            if not assigned:
+                # Value exceeds all bands, put in last band
+                band_triangles[len(bands) - 1].append((pa, pb, pc))
+    
+    # Build compounds for each band
+    result = []
+    for i, (lower, upper, color) in enumerate(bands):
+        if band_triangles[i]:
+            compound = build_triangle_compound_from_coords(band_triangles[i])
+            result.append((compound, color, lower, upper))
+    
+    return result
+
+
+def build_triangle_compound_from_coords(
+    triangles: List[Tuple[Tuple[float, float, float], Tuple[float, float, float], Tuple[float, float, float]]],
+) -> Compound:
+    """Build a build123d Compound from triangular faces given by coordinates.
+    
+    Args:
+        triangles: List of ((x1,y1,z1), (x2,y2,z2), (x3,y3,z3)) tuples
+        
+    Returns:
+        build123d Compound of triangular faces
+    """
+    builder = BRep_Builder()
+    compound = TopoDS_Compound()
+    builder.MakeCompound(compound)
+    
+    for p1, p2, p3 in triangles:
+        pt1, pt2, pt3 = gp_Pnt(*p1), gp_Pnt(*p2), gp_Pnt(*p3)
+        
+        try:
+            polygon = BRepBuilderAPI_MakePolygon(pt1, pt2, pt3, True)
+            if polygon.IsDone():
+                face_maker = BRepBuilderAPI_MakeFace(polygon.Wire(), True)
+                if face_maker.IsDone():
+                    builder.Add(compound, face_maker.Face())
+        except Exception:
+            pass
+    
+    return Compound(compound)
+
+
 def apply_displacements(
     nodes: Dict[int, Tuple[float, float, float]],
     displacements: Dict[int, Tuple[float, float, float]],
@@ -637,6 +811,8 @@ def show_fea_results_colormap(
     stress_limit: Optional[float] = None,
     reference_length: Optional[float] = None,
     arrow_scale: float = 1.0,
+    smooth_colors: bool = True,
+    subdivisions: int = 3,
 ):
     """Visualize FEA results with limit-based colormaps for displacement and stress.
     
@@ -662,6 +838,8 @@ def show_fea_results_colormap(
         stress_limit: Allowable stress (MPa). If None, uses 24 MPa (C24 bending strength)
         reference_length: Reference length for L/300 displacement limit (mm)
         arrow_scale: Scale factor for force arrows (1.0 = default size)
+        smooth_colors: Use subdivision for smoother color gradients (default True)
+        subdivisions: Number of subdivisions per triangle edge (higher = smoother)
         
     Returns:
         Dict with visualization info including max values and limit checks
@@ -751,6 +929,8 @@ def show_fea_results_colormap(
     print(f"  Cyan→Green:       50-80% of limit (acceptable)")
     print(f"  Green→Red:        80-100% of limit (warning)")
     print(f"  Red→Dark Purple:  100-200%+ of limit (EXCEEDED)")
+    if smooth_colors:
+        print(f"  Smoothing: {subdivisions}x subdivision per triangle")
     print(f"{'='*60}")
     
     # Collect all objects to show
@@ -762,9 +942,17 @@ def show_fea_results_colormap(
             offset_shape = shape.move(Location((-8000, 0, 0)))
             objects_to_show.append((offset_shape, f"Original: {name}", {"color": color, "alpha": original_alpha}))
     
+    # Choose mesh building function based on smoothing setting
+    if smooth_colors:
+        build_mesh_fn = lambda faces, nodes, values, limit: build_smooth_colored_mesh(
+            faces, nodes, values, limit, subdivisions=subdivisions
+        )
+    else:
+        build_mesh_fn = build_colored_mesh_by_limit
+    
     # Displacement colormap using limits
     if show_displacement:
-        disp_bands = build_colored_mesh_by_limit(
+        disp_bands = build_mesh_fn(
             outer_faces, deformed_nodes, disp_magnitudes, displacement_limit
         )
         for compound, color, band_min, band_max in disp_bands:
@@ -780,7 +968,7 @@ def show_fea_results_colormap(
     
     # Stress colormap using limits
     if show_stress and von_mises:
-        stress_bands = build_colored_mesh_by_limit(
+        stress_bands = build_mesh_fn(
             outer_faces, deformed_nodes, von_mises, stress_limit
         )
         for compound, color, band_min, band_max in stress_bands:
