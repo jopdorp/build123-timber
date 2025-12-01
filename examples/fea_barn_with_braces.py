@@ -18,7 +18,6 @@ from fea_utils import visualize_frame_with_mesh, run_fea_analysis, visualize_fea
 
 reset_show()
 
-# %%
 # Build barn WITH braces
 # Bent braces: 30°, longer (1000mm brace length)
 # Girt braces: 45°, shorter (707mm brace length, ~500mm horizontal)
@@ -44,6 +43,7 @@ config = BarnConfig(
     girt_brace_angle=45.0,
 )
 
+# %%
 barn = BarnFrame.build(config)
 
 # Show geometry summary
@@ -135,7 +135,7 @@ if 'result' not in dir() or result is None:
 visualize_fea_results(
     result, 
     output_dir, 
-    cad_shapes if cad_shapes else [],
+    cad_shapes if 'cad_shapes' in dir() else [],
     scale=4.0,
     reference_length=config.beam_length,  # 5000mm -> L/300 = 16.7mm
     stress_limit=24.0,  # C24 f_m_k
