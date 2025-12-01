@@ -150,7 +150,9 @@ def value_to_limit_color(value: float, limit: float) -> str:
     - 0-50% of limit: Blue → Cyan (safe)
     - 50-80% of limit: Cyan → Green (acceptable)
     - 80-100% of limit: Green → Red (warning to limit)
-    - >100% of limit: Red → Dark Purple (exceeded)
+    - 100-200% of limit: Red → Magenta (exceeded)
+    - 200-300% of limit: Magenta → Purple (severely exceeded)
+    - 300-500% of limit: Purple → Dark Purple (critical)
     
     Args:
         value: The actual value
@@ -179,13 +181,27 @@ def value_to_limit_color(value: float, limit: float) -> str:
         r = int(255 * t)
         g = int(255 * (1 - t))
         b = 0
-    else:
-        # Red (100%) to Dark Purple (200%+) - exceeded
-        t = min(1.0, (ratio - 1.0) / 1.0)  # Full purple at 200%
-        # Fade from red (255, 0, 0) to dark purple (80, 0, 80)
-        r = int(255 - 175 * t)
+    elif ratio <= 2.0:
+        # Red (100%) to Magenta (200%) - exceeded
+        t = (ratio - 1.0) / 1.0
+        # Fade from red (255, 0, 0) to magenta (255, 0, 255)
+        r = 255
         g = 0
-        b = int(80 * t)
+        b = int(255 * t)
+    elif ratio <= 3.0:
+        # Magenta (200%) to Purple (300%) - severely exceeded
+        t = (ratio - 2.0) / 1.0
+        # Fade from magenta (255, 0, 255) to purple (128, 0, 255)
+        r = int(255 - 127 * t)
+        g = 0
+        b = 255
+    else:
+        # Purple (300%) to Dark Purple (500%) - critical
+        t = min(1.0, (ratio - 3.0) / 2.0)
+        # Fade from purple (128, 0, 255) to dark purple (64, 0, 128)
+        r = int(128 - 64 * t)
+        g = 0
+        b = int(255 - 127 * t)
     
     return f"#{r:02X}{g:02X}{b:02X}"
 
@@ -195,7 +211,7 @@ def get_limit_color_bands(limit: float, n_bands: int = 2048) -> List[Tuple[float
     
     Bands are distributed to give more resolution near the limit:
     - 2/3 of bands from 0 to limit (0-100%)
-    - 1/3 of bands from limit to 1.5*limit (100-150%)
+    - 1/3 of bands from limit to 5*limit (100-500%)
     
     Returns list of (lower_value, upper_value, hex_color) tuples.
     """
@@ -210,12 +226,12 @@ def get_limit_color_bands(limit: float, n_bands: int = 2048) -> List[Tuple[float
         color = value_to_limit_color(mid, limit)
         bands.append((lower, upper, color))
     
-    # Bands above limit (100-300%): 1/3 of total bands
-    # Goes to 300% so we can see the full red-to-purple gradient
+    # Bands above limit (100-500%): 1/3 of total bands
+    # Goes to 500% to show full red->dark red->purple->dark purple gradient
     n_above = n_bands - n_below
     for i in range(n_above):
-        lower = limit * (1.0 + 2.0 * i / n_above)
-        upper = limit * (1.0 + 2.0 * (i + 1) / n_above)
+        lower = limit * (1.0 + 4.0 * i / n_above)
+        upper = limit * (1.0 + 4.0 * (i + 1) / n_above)
         mid = (lower + upper) / 2
         color = value_to_limit_color(mid, limit)
         bands.append((lower, upper, color))
@@ -511,8 +527,10 @@ def build_smooth_colored_mesh(
         # Subdivide and get sub-triangles with interpolated values
         sub_triangles = subdivide_triangle(p1, p2, p3, v1, v2, v3, subdivisions)
         
-        # Assign each sub-triangle to a color band based on its average value
+        # Assign each sub-triangle to a color band based on its max value
+        # (makes stress concentrations more visible)
         for pa, pb, pc, avg_val in sub_triangles:
+            # Use the interpolated value (which represents the local max in subdivided region)
             # Find which band this value belongs to
             assigned = False
             for i, (lower, upper, color) in enumerate(bands):
@@ -725,7 +743,7 @@ def build_colored_mesh_by_limit(
     
     for face in faces:
         n1, n2, n3 = face
-        # Use average value of face nodes
+        # Use max value of face nodes (makes stress concentrations more visible)
         vals = []
         for nid in (n1, n2, n3):
             if nid in node_values:
@@ -734,11 +752,11 @@ def build_colored_mesh_by_limit(
         if not vals:
             continue
         
-        avg_val = sum(vals) / len(vals)
+        max_val = max(vals)
         
         # Find which band this value belongs to
         for i, (lower, upper, color) in enumerate(bands):
-            if lower <= avg_val < upper:
+            if lower <= max_val < upper:
                 band_faces[i].append(face)
                 break
         else:
@@ -813,6 +831,7 @@ def show_fea_results_colormap(
     arrow_scale: float = 1.0,
     smooth_colors: bool = True,
     subdivisions: int = 3,
+    stress_alpha: float = 0.7,
 ):
     """Visualize FEA results with limit-based colormaps for displacement and stress.
     
@@ -840,6 +859,7 @@ def show_fea_results_colormap(
         arrow_scale: Scale factor for force arrows (1.0 = default size)
         smooth_colors: Use subdivision for smoother color gradients (default True)
         subdivisions: Number of subdivisions per triangle edge (higher = smoother)
+        stress_alpha: Transparency for stress visualization (0.7 = slightly transparent to see inside joints)
         
     Returns:
         Dict with visualization info including max values and limit checks
@@ -928,7 +948,9 @@ def show_fea_results_colormap(
     print(f"  Blue→Cyan:        0-50% of limit (safe)")
     print(f"  Cyan→Green:       50-80% of limit (acceptable)")
     print(f"  Green→Red:        80-100% of limit (warning)")
-    print(f"  Red→Dark Purple:  100-200%+ of limit (EXCEEDED)")
+    print(f"  Red→Magenta:      100-200% of limit (EXCEEDED)")
+    print(f"  Magenta→Purple:   200-300% of limit (severely exceeded)")
+    print(f"  Purple→Dark:      300-500% of limit (critical)")
     if smooth_colors:
         print(f"  Smoothing: {subdivisions}x subdivision per triangle")
     print(f"{'='*60}")
@@ -966,7 +988,7 @@ def show_fea_results_colormap(
                 {"color": color}
             ))
     
-    # Stress colormap using limits
+    # Stress colormap using limits (with transparency to see inside joints)
     if show_stress and von_mises:
         stress_bands = build_mesh_fn(
             outer_faces, deformed_nodes, von_mises, stress_limit
@@ -979,7 +1001,7 @@ def show_fea_results_colormap(
             objects_to_show.append((
                 offset_compound,
                 f"Stress {pct_min:.0f}-{pct_max:.0f}%",
-                {"color": color}
+                {"color": color, "alpha": stress_alpha}
             ))
     
     # Load force arrows

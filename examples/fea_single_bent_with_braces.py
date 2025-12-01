@@ -10,7 +10,7 @@ A bent is the basic unit of a timber frame:
 from pathlib import Path
 from ocp_vscode import reset_show, show_object
 
-from timber_joints.alignment import build_complete_bent, BraceParams
+from timber_joints.alignment import JointParams, build_complete_bent, BraceParams
 from timber_joints.fea import TimberFrame, LoadBC
 from timber_joints.fea.frame import MemberType
 
@@ -24,7 +24,16 @@ bent = build_complete_bent(
     post_height=3000,
     post_section=150,
     beam_length=5000,
-    brace_params=BraceParams(),
+    joint_params=JointParams(
+        tenon_length=100,
+        shoulder_depth=30,
+    ),
+    brace_params=BraceParams(
+        length=1600,
+        section=100,
+        tenon_length=90,
+        angle=35,
+    ),
 )
 
 left_post = bent.left_post
@@ -71,12 +80,12 @@ def main_load_filter(nid, x, y, z, part, mesh):
             abs(x - mid_x) < 25.0 and 
             abs(z - top_z) < 25.0)
 
-main_load = LoadBC("main_load", main_load_filter, dof=3, total_load=-50000.0)  # 5 tonne down
+main_load = LoadBC("main_load", main_load_filter, dof=3, total_load=-20000.0)  # 2 tonne down
 
 output_dir = Path(__file__).parent / "fea_single_bent_braced_output"
 
 print("Loads:")
-print("  - Main load: 5000 kg (5 tonne) at beam midspan")
+print("  - Main load: 2000 kg (2 tonne) at beam midspan")
 print("  - Self-weight: automatic")
 print()
 
@@ -88,7 +97,6 @@ result = run_fea_analysis(
     reference_length=5000.0  # beam span
 )
 
-# %%
 # Visualize FEA results with limit-based colormap
 # - Displacement limit: 5000/300 = 16.7mm (L/300)
 # - Stress limit: 24 MPa (C24 f_m_k)

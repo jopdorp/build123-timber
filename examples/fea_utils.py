@@ -252,6 +252,7 @@ def visualize_fea_results(
     stress_limit: Optional[float] = None,
     smooth_colors: bool = True,
     subdivisions: int = 3,
+    stress_alpha: float = 0.7,
 ):
     """Visualize FEA results with deformed shape and colormaps.
     
@@ -267,6 +268,7 @@ def visualize_fea_results(
         stress_limit: Allowable stress (MPa). If None, uses 24 MPa (C24 f_m_k)
         smooth_colors: Use subdivision for smoother color gradients (default True)
         subdivisions: Number of subdivisions per triangle edge (higher = smoother)
+        stress_alpha: Transparency for stress visualization (0.7 = see inside joints)
     """
     if result.success:
         if use_colormap:
@@ -284,6 +286,7 @@ def visualize_fea_results(
                 stress_limit=stress_limit,
                 smooth_colors=smooth_colors,
                 subdivisions=subdivisions,
+                stress_alpha=stress_alpha,
             )
         else:
             show_fea_results(
