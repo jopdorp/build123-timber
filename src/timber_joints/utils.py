@@ -6,6 +6,82 @@ from typing import Tuple
 from build123d import Align, Axis, Box, Part, Location, Polyline, make_face, extrude, loft, Sketch, Rectangle, Plane
 
 
+# =============================================================================
+# Bounding Box and Shape Utilities
+# =============================================================================
+
+def get_bbox_solid(bbox) -> Part:
+    """Create a solid box from a bounding box."""
+    size_x = bbox.max.X - bbox.min.X
+    size_y = bbox.max.Y - bbox.min.Y
+    size_z = bbox.max.Z - bbox.min.Z
+    box = Box(size_x, size_y, size_z, align=(Align.MIN, Align.MIN, Align.MIN))
+    return box.move(Location((bbox.min.X, bbox.min.Y, bbox.min.Z)))
+
+
+def scale_shape_in_place(shape: Part, scale_factor: float) -> Part:
+    """Scale a shape from its center (not from origin)."""
+    center = shape.bounding_box().center()
+    centered = shape.move(Location((-center.X, -center.Y, -center.Z)))
+    scaled = centered.scale(scale_factor)
+    return scaled.move(Location((center.X, center.Y, center.Z)))
+
+
+def expand_shape_by_margin(shape: Part, margin: float) -> Part:
+    """
+    Scale a shape to expand its bounding box by a fixed margin on each axis.
+    
+    Unlike uniform scaling, this calculates independent scale factors per axis
+    to achieve the same absolute margin expansion on each side.
+    
+    Note: This function creates a copy of the input shape to avoid mutation.
+    
+    Args:
+        shape: The shape to expand
+        margin: Fixed amount (mm) to add to each side of each axis
+    
+    Returns:
+        A new shape scaled non-uniformly to achieve the margin expansion
+    """
+    from OCP.gp import gp_GTrsf
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_GTransform
+    
+    # Deep copy to avoid mutating the original
+    shape = copy.deepcopy(shape)
+    
+    bbox = shape.bounding_box()
+    center = bbox.center()
+    
+    # Calculate size in each dimension
+    size_x = bbox.max.X - bbox.min.X
+    size_y = bbox.max.Y - bbox.min.Y
+    size_z = bbox.max.Z - bbox.min.Z
+    
+    # Calculate scale factor for each axis to add margin to each side
+    scale_x = (size_x + 2 * margin) / size_x if size_x > 0 else 1.0
+    scale_y = (size_y + 2 * margin) / size_y if size_y > 0 else 1.0
+    scale_z = (size_z + 2 * margin) / size_z if size_z > 0 else 1.0
+    
+    # Move shape to origin, apply non-uniform scale, move back
+    centered = shape.move(Location((-center.X, -center.Y, -center.Z)))
+    
+    # Create non-uniform scaling transformation
+    gtrsf = gp_GTrsf()
+    gtrsf.SetValue(1, 1, scale_x)
+    gtrsf.SetValue(2, 2, scale_y)
+    gtrsf.SetValue(3, 3, scale_z)
+    
+    transform = BRepBuilderAPI_GTransform(centered.wrapped, gtrsf, True)
+    scaled = Part(transform.Shape())
+    
+    return scaled.move(Location((center.X, center.Y, center.Z)))
+
+
+# =============================================================================
+# Shape Dimension Utilities
+# =============================================================================
+
+
 def get_shape_dimensions(shape) -> Tuple[Part, float, float, float]:
     """Extract Part shape and XYZ dimensions from a Beam or Part.
     

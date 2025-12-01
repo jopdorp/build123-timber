@@ -47,8 +47,7 @@ config = BarnConfig(
 barn = BarnFrame.build(config)
 
 # Show geometry summary
-print("Visualizing barn frame geometry with braces...")
-barn.show(show_object)
+print("Barn frame geometry with braces:")
 print(barn.summary())
 
 # %%

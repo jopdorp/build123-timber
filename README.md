@@ -155,27 +155,24 @@ All joints represent the **inserting part only** - create mortises/housings with
 4. **Export** - Generate IFC, STEP files, or beam schedules
 5. **Analyze** (optional) - Run FEA to verify structural integrity
 
-## Analysis Example
+## FEA Analysis Example
 
 ```python
-from timber_joints import analyze_frame, TimberMaterial, AnalysisConfig
+from examples.fea_utils import run_fea_analysis, visualize_fea_results
 
-# Configure analysis
-config = AnalysisConfig(
-    material=TimberMaterial.DOUGLAS_FIR,
-    mesh_size=50,
-    contact_stiffness=1e6
+# Run FEA analysis (requires gmsh + CalculiX)
+results = run_fea_analysis(
+    frame,
+    element_size=150.0,  # Coarse mesh size
+    element_size_fine=40.0,  # Fine mesh at contacts
+    load_magnitude=10000.0,  # 10 kN total load
 )
 
-# Run FEA (requires gmsh + CalculiX)
-result = analyze_frame(frame, config, loads={
-    "tie_beam": ("gravity", 1000)  # 1000N distributed load
-})
-
-# Check results
-print(f"Max displacement: {result.max_displacement:.2f} mm")
-print(f"Max stress: {result.max_stress:.2f} MPa")
+# Visualize deformed shape
+visualize_fea_results(results, scale=50.0)
 ```
+
+See `examples/fea_single_bent_with_braces.py` for a complete working example.
 
 ## Architecture
 

@@ -48,15 +48,8 @@ from timber_joints.export import (
     export_beam_schedule,
 )
 
-# Analysis (optional - requires gmsh/CalculiX)
-from timber_joints.analysis import (
-    TimberMaterial,
-    AnalysisConfig,
-    AnalysisResult,
-    analyze_element,
-    analyze_frame,
-    print_analysis_summary,
-    # Shape utilities
+# Shape utilities
+from timber_joints.utils import (
     get_bbox_solid,
     scale_shape_in_place,
     expand_shape_by_margin,
@@ -108,13 +101,6 @@ __all__ = [
     "export_frame_to_ifc",
     "show_frame",
     "export_beam_schedule",
-    # Analysis
-    "TimberMaterial",
-    "AnalysisConfig",
-    "AnalysisResult",
-    "analyze_element",
-    "analyze_frame",
-    "print_analysis_summary",
     # Shape utilities
     "get_bbox_solid",
     "scale_shape_in_place",

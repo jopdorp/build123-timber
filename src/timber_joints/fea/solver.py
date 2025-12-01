@@ -151,7 +151,7 @@ class StepConfig:
     For contact problems, use smaller initial_increment (0.01-0.05) to help
     convergence. The solver will automatically adjust step size.
     """
-    initial_increment: float = 0.01  # Start with 1% of load for difficult contact problems
+    initial_increment: float = 0.05  # Start with 1% of load for difficult contact problems
     total_time: float = 1.0
     min_increment: float = 1e-8      # Allow very small steps for difficult convergence
     max_increment: float = 0.1       # Conservative max jump for contact

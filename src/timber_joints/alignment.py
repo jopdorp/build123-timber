@@ -276,7 +276,7 @@ def create_receiving_cut(
     Positive margin makes the mortise larger than the tenon for clearance.
     """
     if margin > 0:
-        from timber_joints.analysis import expand_shape_by_margin
+        from timber_joints.utils import expand_shape_by_margin
         insert_with_margin = expand_shape_by_margin(positioned_insert, margin)
         return receiving_shape - insert_with_margin
     return receiving_shape - positioned_insert

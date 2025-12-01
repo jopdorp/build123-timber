@@ -389,13 +389,12 @@ def find_mesh_contact_faces(
     """
     Find mesh element faces at the contact region between two meshed parts.
     
-    Uses a distance-based approach with KD-tree for efficient proximity queries:
-    1. Find boundary faces (faces only used by one element = surface faces)
-    2. Build KD-tree from face centroids of each mesh
-    3. Find faces from each mesh that are within margin distance of the other mesh
+    Two-stage approach for efficiency:
+    1. Coarse filter: Find faces within bounding box intersection (fast)
+    2. Fine filter: Use KD-tree to find faces within margin distance (accurate)
     
     This works correctly for diagonal braces where bounding box intersection
-    would give overly large contact regions.
+    alone would give overly large contact regions.
     
     Args:
         elements_a: Elements of mesh A as (element_id, [n1, n2, n3, n4]) tuples
@@ -446,6 +445,36 @@ def find_mesh_contact_faces(
             (coords[0][2] + coords[1][2] + coords[2][2]) / 3,
         )
     
+    def get_mesh_bbox(nodes: dict):
+        """Get bounding box of mesh nodes."""
+        coords = list(nodes.values())
+        if not coords:
+            return None
+        return (
+            min(c[0] for c in coords), max(c[0] for c in coords),
+            min(c[1] for c in coords), max(c[1] for c in coords),
+            min(c[2] for c in coords), max(c[2] for c in coords),
+        )
+    
+    def bbox_intersection(bbox_a, bbox_b, expand):
+        """Find intersection of two bounding boxes, expanded by margin."""
+        min_x = max(bbox_a[0], bbox_b[0]) - expand
+        max_x = min(bbox_a[1], bbox_b[1]) + expand
+        min_y = max(bbox_a[2], bbox_b[2]) - expand
+        max_y = min(bbox_a[3], bbox_b[3]) + expand
+        min_z = max(bbox_a[4], bbox_b[4]) - expand
+        max_z = min(bbox_a[5], bbox_b[5]) + expand
+        
+        if min_x > max_x or min_y > max_y or min_z > max_z:
+            return None
+        return (min_x, max_x, min_y, max_y, min_z, max_z)
+    
+    def point_in_bbox(point, bbox):
+        """Check if point is inside bounding box."""
+        return (bbox[0] <= point[0] <= bbox[1] and
+                bbox[2] <= point[1] <= bbox[3] and
+                bbox[4] <= point[2] <= bbox[5])
+    
     if verbose:
         print("  Finding boundary faces...")
     boundary_a = get_boundary_faces_dict(elements_a)
@@ -453,34 +482,52 @@ def find_mesh_contact_faces(
     if verbose:
         print(f"  Mesh A: {len(boundary_a)} boundary faces, Mesh B: {len(boundary_b)} boundary faces")
     
-    # Build lists of face keys and centroids for each mesh
-    faces_a_list = list(boundary_a.keys())
-    faces_b_list = list(boundary_b.keys())
+    # Stage 1: Coarse filter using bounding box intersection
+    bbox_a = get_mesh_bbox(nodes_a)
+    bbox_b = get_mesh_bbox(nodes_b)
     
-    centroids_a = []
-    valid_faces_a = []
-    for face_key in faces_a_list:
-        centroid = get_face_centroid(boundary_a[face_key], nodes_a)
-        if centroid:
-            centroids_a.append(centroid)
-            valid_faces_a.append(face_key)
-    
-    centroids_b = []
-    valid_faces_b = []
-    for face_key in faces_b_list:
-        centroid = get_face_centroid(boundary_b[face_key], nodes_b)
-        if centroid:
-            centroids_b.append(centroid)
-            valid_faces_b.append(face_key)
-    
-    if not centroids_a or not centroids_b:
+    if bbox_a is None or bbox_b is None:
         if verbose:
-            print("  No valid face centroids found!")
+            print("  Could not compute bounding boxes!")
         return [], []
     
-    # Build KD-trees for efficient proximity queries
-    centroids_a_np = np.array(centroids_a)
-    centroids_b_np = np.array(centroids_b)
+    # Use larger margin for bbox intersection (coarse filter)
+    bbox_margin = margin * 2
+    intersection = bbox_intersection(bbox_a, bbox_b, bbox_margin)
+    
+    if intersection is None:
+        if verbose:
+            print("  No bounding box intersection found!")
+        return [], []
+    
+    # Get face centroids only for faces in the intersection region
+    candidate_faces_a = []
+    candidate_centroids_a = []
+    for face_key, face_nodes in boundary_a.items():
+        centroid = get_face_centroid(face_nodes, nodes_a)
+        if centroid and point_in_bbox(centroid, intersection):
+            candidate_faces_a.append(face_key)
+            candidate_centroids_a.append(centroid)
+    
+    candidate_faces_b = []
+    candidate_centroids_b = []
+    for face_key, face_nodes in boundary_b.items():
+        centroid = get_face_centroid(face_nodes, nodes_b)
+        if centroid and point_in_bbox(centroid, intersection):
+            candidate_faces_b.append(face_key)
+            candidate_centroids_b.append(centroid)
+    
+    if verbose:
+        print(f"  Candidates in bbox intersection: {len(candidate_faces_a)} from A, {len(candidate_faces_b)} from B")
+    
+    if not candidate_centroids_a or not candidate_centroids_b:
+        if verbose:
+            print("  No candidate faces in intersection region!")
+        return [], []
+    
+    # Stage 2: Fine filter using KD-tree distance
+    centroids_a_np = np.array(candidate_centroids_a)
+    centroids_b_np = np.array(candidate_centroids_b)
     
     tree_a = cKDTree(centroids_a_np)
     tree_b = cKDTree(centroids_b_np)
@@ -490,14 +537,14 @@ def find_mesh_contact_faces(
     contact_faces_a = []
     for i, neighbors in enumerate(close_to_b):
         if neighbors:  # Has at least one neighbor within margin
-            contact_faces_a.append(valid_faces_a[i])
+            contact_faces_a.append(candidate_faces_a[i])
     
     # Find faces from B that are close to any face in A
     close_to_a = tree_a.query_ball_point(centroids_b_np, margin)
     contact_faces_b = []
     for i, neighbors in enumerate(close_to_a):
         if neighbors:  # Has at least one neighbor within margin
-            contact_faces_b.append(valid_faces_b[i])
+            contact_faces_b.append(candidate_faces_b[i])
     
     if verbose:
         print(f"  Found {len(contact_faces_a)} faces from mesh A, {len(contact_faces_b)} faces from mesh B within {margin}mm")
@@ -597,17 +644,14 @@ def mesh_parts_with_contact_refinement(
             verbose=verbose,
         )
         
-        # Add refinement boxes for both parts
-        for part_name, faces, elems, nodes in [
-            (contact.part_a, faces_a, elems_a, mesh_a.nodes),
-            (contact.part_b, faces_b, elems_b, mesh_b.nodes),
-        ]:
-            bbox = get_contact_region_bbox(faces, elems, nodes)
-            if bbox:
-                expanded = expand_bbox(bbox, config.refinement_margin)
-                refinement_boxes[part_name].append(
-                    RefinementBox(expanded[0], expanded[1], config.element_size_fine)
-                )
+        # Use slave's (part_a) contact region bbox for refinement on BOTH parts
+        # This gives tight refinement around the joint location (slave's tip)
+        bbox_a = get_contact_region_bbox(faces_a, elems_a, mesh_a.nodes)
+        if bbox_a:
+            expanded = expand_bbox(bbox_a, config.refinement_margin)
+            refinement_box = RefinementBox(expanded[0], expanded[1], config.element_size_fine)
+            refinement_boxes[contact.part_a].append(refinement_box)
+            refinement_boxes[contact.part_b].append(refinement_box)
     
     # Pass 2: Refined mesh
     if verbose:

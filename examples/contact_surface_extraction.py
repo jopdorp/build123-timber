@@ -8,7 +8,7 @@ from ocp_vscode import show_object, reset_show
 from build123d import Location
 
 from timber_joints.alignment import build_complete_bent
-from timber_joints.analysis import find_joint_contact_surfaces, scale_shape_in_place
+from timber_joints.utils import scale_shape_in_place
 
 # Build bent and downscale beam to create gap for contact analysis
 bent = build_complete_bent(
@@ -55,7 +55,7 @@ print(f"Right joint: tenon {len(right_tenon.faces())} faces ({right_tenon_area:.
 # This test uses a fixed margin (in mm) to shrink the beam, which gives
 # consistent gap size regardless of beam dimensions.
 
-from timber_joints.analysis import expand_shape_by_margin
+from timber_joints.utils import expand_shape_by_margin
 
 # Build a fresh bent
 bent2 = build_complete_bent(
@@ -109,7 +109,7 @@ from build123d import Location, Compound, export_step
 from pathlib import Path
 import gmsh
 from timber_joints.alignment import build_complete_bent
-from timber_joints.analysis import expand_shape_by_margin
+from timber_joints.utils import expand_shape_by_margin
 from timber_joints.fea.meshing import find_mesh_contact_faces, build_mesh_faces_compound
 
 # Build a fresh bent
