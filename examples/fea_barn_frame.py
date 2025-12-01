@@ -1,21 +1,23 @@
 # %%
-"""FEA test for 3-bent barn frame with girts (no braces).
+"""FEA analysis of a 3-bent barn frame WITHOUT braces.
 
-This test uses the high-level BarnFrame API to create:
+A barn frame consists of:
 - 3 bents (each with 2 posts + 1 cross beam) spaced along Y axis
 - 2 girts running longitudinally connecting post tops along Y
-- Posts have tenons going UP into girts (girts have mortises)
 """
 
 from pathlib import Path
 from ocp_vscode import reset_show, show_object
 
 from timber_joints.barn import BarnConfig, BarnFrame
-from timber_joints.fea import show_fea_results, LoadBC
+from timber_joints.fea import LoadBC
+
+from fea_utils import visualize_frame_with_mesh, run_fea_analysis, visualize_fea_results
 
 reset_show()
 
-# Build barn without braces
+# %%
+# Build barn WITHOUT braces
 config = BarnConfig(
     post_height=3000,
     post_section=150,
@@ -33,24 +35,29 @@ config = BarnConfig(
 
 barn = BarnFrame.build(config)
 
-# Show the geometry
-print("Visualizing barn frame geometry...")
+# Show geometry summary
+print("Visualizing barn frame geometry (no braces)...")
 barn.show(show_object)
 print(barn.summary())
 
+# %%
+# Visualize CAD, mesh, and contacts
+frame = barn.to_fea_frame()
+
+cad_shapes = [(part, name, "sienna" if "post" in name else "burlywood") 
+              for part, name in barn.all_parts()]
+
+visualize_frame_with_mesh(
+    frame,
+    cad_shapes,
+    offset_axis="X",
+    cad_offset=0,
+    mesh_offset=6000,
+    contact_offset=12000,
+)
 
 # %%
-# FEA Analysis
-frame = barn.to_fea_frame()
-output_dir = Path(__file__).parent / "fea_barn_frame_output"
-
-print("=" * 60)
-print("3-BENT BARN FRAME FEA ANALYSIS")
-print("=" * 60)
-print(barn.summary())
-print()
-
-# Define additional loads on girts
+# Define loads on girts
 right_girt_bbox = barn.right_girt.bounding_box()
 right_girt_y_quarter = right_girt_bbox.min.Y + (right_girt_bbox.max.Y - right_girt_bbox.min.Y) * 0.25
 right_girt_top_z = right_girt_bbox.max.Z
@@ -80,44 +87,18 @@ print(f"  - Left girt at Y={left_girt_y_threequarter:.1f}mm: 50 kg sideways (+X)
 print(f"  - Self-weight: automatic")
 print()
 
-result = frame.analyze(
+# %%
+# Run FEA analysis
+output_dir = Path(__file__).parent / "fea_barn_frame_output"
+
+result = run_fea_analysis(
+    frame,
+    output_dir,
+    title="3-BENT BARN FRAME FEA ANALYSIS (NO BRACES)",
     additional_loads=additional_loads,
-    output_dir=output_dir,
-    mesh_size=200.0,
-    mesh_size_fine=60.0,
+    reference_length=config.beam_length,
 )
-
-print("\n" + "=" * 60)
-print("ANALYSIS SUMMARY")
-print("=" * 60)
-print(f"Success: {result.success}")
-print(f"Mesh: {result.num_nodes} nodes, {result.num_elements} elements")
-
-if result.success:
-    print(f"\nDeflection Results:")
-    print(f"  Max total: {result.fea_results.max_displacement:.4f} mm")
-    print(f"  Max Z: {result.fea_results.max_uz:.4f} mm")
-    
-    limit = config.beam_length / 300  # L/300
-    status = "PASS ✓" if abs(result.fea_results.max_uz) < limit else "FAIL ✗"
-    print(f"  Limit (L/300): {limit:.2f} mm")
-    print(f"  Status: {status}")
-
-print("=" * 60)
-
 
 # %%
 # Visualize FEA results
-if result.success:
-    # Build original shapes list for visualization
-    original_shapes = [(part, name, "sienna" if "post" in name else "burlywood") 
-                       for part, name in barn.all_parts()]
-    
-    show_fea_results(
-        mesh_file=str(output_dir / "mesh.inp"),
-        frd_file=str(output_dir / "analysis.frd"),
-        scale=60.0,
-        original_shapes=original_shapes,
-        deformed_color="red",
-        original_alpha=0.3,
-    )
+visualize_fea_results(result, output_dir, cad_shapes, scale=60.0)

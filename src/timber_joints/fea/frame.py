@@ -384,8 +384,8 @@ class TimberFrame:
         include_self_weight: bool = True,
         mesh_size: float = 150.0,
         mesh_size_fine: float = 40.0,
-        initial_increment: float = 0.05,
-        max_increments: int = 200,
+        initial_increment: float = 0.01,
+        max_increments: int = 500,
         output_dir: Path = None,
         verbose: bool = True,
     ) -> AssemblyResult:

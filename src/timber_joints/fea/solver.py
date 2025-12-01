@@ -85,10 +85,10 @@ class ContactParameters:
     to help convergence. CalculiX will adjust automatically.
     """
     friction_coeff: float = 0.35
-    normal_penalty: float = 100.0    # MPa/mm - lower for better convergence
-    stick_slope: float = 100.0       # Match normal_penalty
-    stabilize: float = 0.001         # Small stabilization
-    adjust: float = 0.5              # mm - smaller adjustment distance
+    normal_penalty: float = 10.0     # MPa/mm - lower for better convergence with complex contacts
+    stick_slope: float = 10.0        # Match normal_penalty
+    stabilize: float = 0.01          # Increased stabilization for complex contacts
+    adjust: float = 1.0              # mm - larger adjustment distance for initial penetration
 
 
 # Node filter function signature
@@ -151,11 +151,11 @@ class StepConfig:
     For contact problems, use smaller initial_increment (0.01-0.05) to help
     convergence. The solver will automatically adjust step size.
     """
-    initial_increment: float = 0.05  # Start with 5% of load for contact problems
+    initial_increment: float = 0.01  # Start with 1% of load for difficult contact problems
     total_time: float = 1.0
-    min_increment: float = 1e-6      # Allow very small steps for difficult convergence
-    max_increment: float = 0.2       # Don't jump too far
-    max_increments: int = 200        # Allow more iterations for contact
+    min_increment: float = 1e-8      # Allow very small steps for difficult convergence
+    max_increment: float = 0.1       # Conservative max jump for contact
+    max_increments: int = 500        # Allow many iterations for contact
     nonlinear_geometry: bool = True
 
 

@@ -1,15 +1,16 @@
 # %%
-"""FEA analysis of a single bent frame WITHOUT braces.
+"""FEA analysis of a single bent frame WITH braces.
 
 A bent is the basic unit of a timber frame:
 - 2 posts (vertical)
 - 1 beam (horizontal, connecting post tops)
+- 2 knee braces (diagonal, for lateral stability)
 """
 
 from pathlib import Path
 from ocp_vscode import reset_show, show_object
 
-from timber_joints.alignment import build_complete_bent
+from timber_joints.alignment import build_complete_bent, BraceParams
 from timber_joints.fea import TimberFrame, LoadBC
 
 from fea_utils import visualize_frame_with_mesh, run_fea_analysis, visualize_fea_results
@@ -17,23 +18,26 @@ from fea_utils import visualize_frame_with_mesh, run_fea_analysis, visualize_fea
 reset_show()
 
 # %%
-# Build bent frame WITHOUT braces
+# Build bent frame WITH braces
 bent = build_complete_bent(
     post_height=3000,
     post_section=150,
     beam_length=5000,
-    brace_params=None,  # No braces
+    brace_params=BraceParams(),
 )
 
 left_post = bent.left_post
 right_post = bent.right_post
 beam = bent.beam
+braces = [b for b in [bent.brace_left, bent.brace_right] if b is not None]
 
 # Create FEA frame
 frame = TimberFrame()
 frame.add_member("left_post", left_post)
 frame.add_member("right_post", right_post)
 frame.add_member("beam", beam)
+for i, brace in enumerate(braces):
+    frame.add_member(f"brace_{i}", brace)
 
 # %%
 # Visualize CAD, mesh, and contacts
@@ -41,7 +45,7 @@ cad_shapes = [
     (left_post, "Left Post", "sienna"),
     (right_post, "Right Post", "sienna"),
     (beam, "Beam", "burlywood"),
-]
+] + [(brace, f"Brace {i}", "orange") for i, brace in enumerate(braces)]
 
 visualize_frame_with_mesh(
     frame, 
@@ -65,7 +69,7 @@ def main_load_filter(nid, x, y, z, part, mesh):
 
 main_load = LoadBC("main_load", main_load_filter, dof=3, total_load=-9810.0)  # 1 tonne down
 
-output_dir = Path(__file__).parent / "fea_single_bent_output"
+output_dir = Path(__file__).parent / "fea_single_bent_braced_output"
 
 print("Loads:")
 print("  - Main load: 1000 kg (1 tonne) at beam midspan")
@@ -75,7 +79,7 @@ print()
 result = run_fea_analysis(
     frame,
     output_dir,
-    title="SINGLE BENT FRAME FEA ANALYSIS (NO BRACES)",
+    title="SINGLE BENT FRAME FEA ANALYSIS (WITH BRACES)",
     additional_loads=[main_load],
     reference_length=5000.0,  # beam span
 )

@@ -1,10 +1,10 @@
 # %%
-"""FEA test for 3-bent barn frame with girts AND braces.
+"""FEA analysis of a 3-bent barn frame WITH braces.
 
-This test uses the high-level BarnFrame API to create:
+A barn frame with full bracing consists of:
 - 3 bents (each with 2 posts + 1 cross beam) spaced along Y axis
 - 2 girts running longitudinally connecting post tops along Y
-- Knee braces per bent for lateral stability
+- Knee braces per bent for lateral stability (bent braces)
 - Girt braces for longitudinal bracing
 """
 
@@ -12,15 +12,16 @@ from pathlib import Path
 from ocp_vscode import reset_show, show_object
 
 from timber_joints.barn import BarnConfig, BarnFrame
-from timber_joints.fea import show_fea_results, LoadBC
+from timber_joints.fea import LoadBC
+
+from fea_utils import visualize_frame_with_mesh, run_fea_analysis, visualize_fea_results
 
 reset_show()
 
-# Frame dimensions
+# %%
+# Build barn WITH braces
 # Bent braces: 30°, longer (1000mm brace length)
 # Girt braces: 45°, shorter (707mm brace length, ~500mm horizontal)
-import math
-
 config = BarnConfig(
     post_height=3000,
     post_section=150,
@@ -43,29 +44,31 @@ config = BarnConfig(
     girt_brace_angle=45.0,
 )
 
-# Build the barn
 barn = BarnFrame.build(config)
 
-# %%
-# Visualize the geometry
+# Show geometry summary
 print("Visualizing barn frame geometry with braces...")
 barn.show(show_object)
 print(barn.summary())
 
-
 # %%
-# FEA Analysis
+# Visualize CAD, mesh, and contacts
 frame = barn.to_fea_frame()
 
-output_dir = Path(__file__).parent / "fea_barn_braced_output"
+cad_shapes = [(part, name, "sienna" if "post" in name else ("orange" if "brace" in name else "burlywood")) 
+              for part, name in barn.all_parts()]
 
-print("=" * 60)
-print("3-BENT BARN FRAME WITH BRACES - FEA ANALYSIS")
-print("=" * 60)
-print(barn.summary())
-print()
+visualize_frame_with_mesh(
+    frame,
+    cad_shapes,
+    offset_axis="X",
+    cad_offset=0,
+    mesh_offset=6000,
+    contact_offset=12000,
+)
 
-# Additional loads on girts
+# %%
+# Define loads on girts
 right_girt_bbox = barn.right_girt.bounding_box()
 right_girt_y_quarter = right_girt_bbox.min.Y + (right_girt_bbox.max.Y - right_girt_bbox.min.Y) * 0.25
 right_girt_top_z = right_girt_bbox.max.Z
@@ -95,11 +98,18 @@ print(f"  - Left girt at Y={left_girt_y_threequarter:.1f}mm: 50 kg sideways (+X)
 print(f"  - Self-weight: automatic")
 print()
 
-result = frame.analyze(
+# %%
+# Run FEA analysis
+output_dir = Path(__file__).parent / "fea_barn_braced_output"
+
+result = run_fea_analysis(
+    frame,
+    output_dir,
+    title="3-BENT BARN FRAME FEA ANALYSIS (WITH BRACES)",
     additional_loads=additional_loads,
-    output_dir=output_dir,
+    reference_length=config.beam_length,
 )
 
-print(f"Success: {result.success}")
-if result.success:
-    print(f"Max deflection: {result.fea_results.max_displacement:.4f} mm")
+# %%
+# Visualize FEA results
+visualize_fea_results(result, output_dir, cad_shapes, scale=60.0)

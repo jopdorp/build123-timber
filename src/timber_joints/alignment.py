@@ -756,6 +756,8 @@ def add_girts_to_bents(
     braces = []
     if brace_params is not None:
         num_bents = len(bents)
+        final_bents = []
+        
         for i, (bent, y_pos) in enumerate(zip(bents, y_positions)):
             # Move posts to Y position for brace creation (deepcopy to avoid mutating original)
             left_post_at_y = copy.deepcopy(bent.left_post).move(Location((0, y_pos, 0)))
@@ -786,6 +788,7 @@ def add_girts_to_bents(
                 )
                 braces.append((f"girt_brace_left_{i+1}{suffix}", left_brace_result.shape))
                 left_girt = left_brace_result.horizontal_member
+                left_post_at_y = left_brace_result.post  # Accumulate cuts on post
                 
                 # Right side brace
                 right_brace_result = create_brace_for_girt(
@@ -798,10 +801,28 @@ def add_girts_to_bents(
                 )
                 braces.append((f"girt_brace_right_{i+1}{suffix}", right_brace_result.shape))
                 right_girt = right_brace_result.horizontal_member
+                right_post_at_y = right_brace_result.post  # Accumulate cuts on post
+            
+            # Move posts back to Y=0 and update the bent with cut posts
+            left_post_final = left_post_at_y.move(Location((0, -y_pos, 0)))
+            right_post_final = right_post_at_y.move(Location((0, -y_pos, 0)))
+            final_bents.append(BentResult(
+                left_post=left_post_final,
+                right_post=right_post_final,
+                beam=bent.beam,
+                brace_left=bent.brace_left,
+                brace_right=bent.brace_right,
+                post_section=bent.post_section,
+                beam_section=bent.beam_section,
+                beam_length=bent.beam_length,
+            ))
+        
+        # Use bents with girt brace mortises cut
+        bents = final_bents
     
     return GirtResult(
         left_girt=left_girt,
         right_girt=right_girt,
-        updated_bents=bents,  # Bents with tenons cut into post tops
+        updated_bents=bents,  # Bents with tenons AND girt brace mortises cut
         braces=braces,
     )

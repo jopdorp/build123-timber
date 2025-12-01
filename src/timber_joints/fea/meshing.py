@@ -636,7 +636,6 @@ def mesh_parts_with_contact_refinement(
     combined = combine_meshes(fine_meshes)
     
     # Find contact surfaces on refined mesh
-    # Use tighter margin for fine mesh - we want actual contact faces, not nearby faces
     contact_surfaces = {}
     
     for contact in contacts:
@@ -646,9 +645,8 @@ def mesh_parts_with_contact_refinement(
         elems_a = [(i + 1, e) for i, e in enumerate(mesh_a.elements)]
         elems_b = [(i + 1, e) for i, e in enumerate(mesh_b.elements)]
         
-        # Use smaller margin for fine mesh contact detection
-        # This should only capture faces that are actually in contact
-        fine_margin = config.element_size_fine * 0.5 + config.contact_gap
+        # Use margin based on fine element size for contact detection
+        fine_margin = config.element_size_fine * 1.1 + config.contact_gap
         
         faces_a, faces_b = find_mesh_contact_faces(
             elems_a, mesh_a.nodes,
