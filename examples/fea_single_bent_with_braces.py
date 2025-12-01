@@ -27,9 +27,10 @@ bent = build_complete_bent(
     joint_params=JointParams(
         tenon_length=100,
         shoulder_depth=30,
+        housing_depth=30,
     ),
     brace_params=BraceParams(
-        length=1600,
+        length=2500,
         section=100,
         tenon_length=90,
         angle=35,
