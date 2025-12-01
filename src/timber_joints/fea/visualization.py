@@ -72,19 +72,19 @@ def value_to_limit_color(value: float, limit: float) -> str:
     return f"#{r:02X}{g:02X}{b:02X}"
 
 
-def get_limit_color_bands(limit: float, n_bands: int = 15) -> List[Tuple[float, float, str]]:
+def get_limit_color_bands(limit: float, n_bands: int = 2048) -> List[Tuple[float, float, str]]:
     """Get discrete color bands for limit-based colormap.
     
     Bands are distributed to give more resolution near the limit:
-    - 10 bands from 0 to limit (0-100%)
-    - 5 bands from limit to 1.5*limit (100-150%)
+    - 2/3 of bands from 0 to limit (0-100%)
+    - 1/3 of bands from limit to 1.5*limit (100-150%)
     
     Returns list of (lower_value, upper_value, hex_color) tuples.
     """
     bands = []
     
-    # Bands below limit (0-100%): 10 bands
-    n_below = 10
+    # Bands below limit (0-100%): 2/3 of total bands
+    n_below = (n_bands * 2) // 3
     for i in range(n_below):
         lower = limit * i / n_below
         upper = limit * (i + 1) / n_below
@@ -92,8 +92,8 @@ def get_limit_color_bands(limit: float, n_bands: int = 15) -> List[Tuple[float, 
         color = value_to_limit_color(mid, limit)
         bands.append((lower, upper, color))
     
-    # Bands above limit (100-150%): 5 bands
-    n_above = 5
+    # Bands above limit (100-150%): 1/3 of total bands
+    n_above = n_bands - n_below
     for i in range(n_above):
         lower = limit * (1.0 + 0.5 * i / n_above)
         upper = limit * (1.0 + 0.5 * (i + 1) / n_above)
@@ -682,7 +682,7 @@ def show_fea_results_colormap(
     colors = [opts.get("color", "gray") for obj, name, opts in objects_to_show]
     alphas = [opts.get("alpha", 1.0) for obj, name, opts in objects_to_show]
     
-    show(*shapes, names=names, colors=colors, alphas=alphas)
+    show(*shapes, names=names, colors=colors, alphas=alphas, render_edges=False)
     
     print(f"\nLayout:")
     print(f"  Left (-8000): Original geometry")

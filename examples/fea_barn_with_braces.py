@@ -135,8 +135,8 @@ if 'result' not in dir() or result is None:
 visualize_fea_results(
     result, 
     output_dir, 
-    cad_shapes, 
-    scale=5.0,
+    cad_shapes if cad_shapes else [],
+    scale=4.0,
     reference_length=config.beam_length,  # 5000mm -> L/300 = 16.7mm
     stress_limit=24.0,  # C24 f_m_k
 )
