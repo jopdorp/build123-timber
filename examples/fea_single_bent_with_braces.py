@@ -30,10 +30,10 @@ bent = build_complete_bent(
         housing_depth=30,
     ),
     brace_params=BraceParams(
-        length=2500,
-        section=100,
+        length=2100,
+        section=120,
         tenon_length=90,
-        angle=35,
+        angle=40,
     ),
 )
 
