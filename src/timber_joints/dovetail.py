@@ -9,19 +9,7 @@ from timber_joints.utils import create_dovetail_cut, calculate_dovetail_taper
 
 @dataclass
 class DovetailInsert(BaseJoint):
-    """The positive (inserting) part of a dovetail joint.
-    
-    Creates a dovetail-shaped projection at the beam end that tapers
-    outward (narrower at the base/beam, wider at the tip/end).
-    
-    Parameters:
-    - beam: The beam (Beam object or Part) to cut the dovetail on
-    - dovetail_width: Width at the narrow end (base, where it meets beam)
-    - dovetail_height: Height of the dovetail
-    - dovetail_length: How far the dovetail extends from the beam end
-    - cone_angle: Angle of taper in degrees (how much it widens toward tip)
-    - at_start: If True, create at start (X=0); if False, at end (X=length)
-    """
+    """Dovetail-shaped projection that tapers outward (narrower at base, wider at tip)."""
     
     dovetail_width: float
     dovetail_height: float
@@ -30,7 +18,6 @@ class DovetailInsert(BaseJoint):
     at_start: bool = False
 
     def __post_init__(self) -> None:
-        """Validate dovetail parameters."""
         super().__post_init__()
         
         if self.dovetail_width <= 0 or self.dovetail_width > self._width:
@@ -43,10 +30,7 @@ class DovetailInsert(BaseJoint):
             raise ValueError("cone_angle must be between 0 and 45 degrees")
 
     def _get_widths(self) -> tuple[float, float]:
-        """Calculate the base (narrow) and tip (wide) widths of the dovetail.
-        
-        Returns: (base_width, tip_width) where tip_width > base_width
-        """
+        """Calculate (base_width, tip_width) where tip_width > base_width."""
         taper = calculate_dovetail_taper(self.cone_angle, self.dovetail_length) / 2
         base_width = self.dovetail_width
         tip_width = self.dovetail_width + 2 * taper
@@ -54,8 +38,6 @@ class DovetailInsert(BaseJoint):
 
     @property
     def shape(self) -> Part:
-        """Create the dovetail insert by removing material around the tapered projection."""
-        # Determine position based on at_start
         if self.at_start:
             x_pos = 0
         else:
@@ -87,7 +69,6 @@ class DovetailInsert(BaseJoint):
         return self._input_shape - waste
 
     def _get_z_center(self) -> float:
-        """Get the Z center position for the dovetail. Override in subclasses."""
         return self._height / 2
 
     def __repr__(self) -> str:

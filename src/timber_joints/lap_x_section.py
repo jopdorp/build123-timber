@@ -8,18 +8,7 @@ from timber_joints.utils import create_lap_cut
 
 @dataclass
 class LapXSection(BaseJoint):
-    """A lap joint cut at a specific point along the beam (not at the end).
-    
-    Creates a lap cut centered around a specified X position along the beam.
-    This is useful for cross-lap joints where two beams intersect.
-    
-    Parameters:
-    - beam: The beam to cut the lap on
-    - cut_depth: How deep to cut (from top or bottom)
-    - cut_length: Length of the cut along X axis
-    - x_position: Center point of the lap cut along the beam length
-    - from_top: If True, cut from top; if False, cut from bottom
-    """
+    """Lap cut centered at a specific X position along the beam (for cross-lap joints)."""
     
     cut_depth: float
     cut_length: float
@@ -27,7 +16,6 @@ class LapXSection(BaseJoint):
     from_top: bool = True
 
     def __post_init__(self) -> None:
-        """Validate lap parameters."""
         super().__post_init__()
         
         if self.cut_depth <= 0 or self.cut_depth >= self._height:
@@ -44,8 +32,6 @@ class LapXSection(BaseJoint):
 
     @property
     def shape(self) -> Part:
-        """Create the beam with a lap cut at the specified cross-section."""
-        # Calculate X start position (centered on x_position)
         x_start = self.x_position - self.cut_length / 2
         
         cut = create_lap_cut(

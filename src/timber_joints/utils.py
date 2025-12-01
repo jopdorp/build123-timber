@@ -6,30 +6,16 @@ from build123d import Align, Axis, Box, Part, Location, Polyline, make_face, ext
 
 
 def get_shape_dimensions(shape) -> Tuple[Part, float, float, float]:
-    """Extract the Part shape and its dimensions from a Beam or Part.
+    """Extract Part shape and XYZ dimensions from a Beam or Part.
     
-    This utility function allows joint classes to accept either a Beam object
-    (with .shape attribute) or a raw Part. It uses bounding box to determine
-    dimensions, making it work with already-cut shapes.
-    
-    Args:
-        shape: Either a Beam object (with .shape and dimension attributes) 
-               or a Part object
-    
-    Returns:
-        Tuple of (part_shape, length, width, height) where:
-        - part_shape: The Part geometry
-        - length: X dimension (from bounding box)
-        - width: Y dimension (from bounding box)
-        - height: Z dimension (from bounding box)
+    Accepts either a Beam (with .shape attribute) or raw Part.
+    Uses bounding box for dimensions, so works with already-cut shapes.
     """
-    # Get the underlying Part shape
     if hasattr(shape, 'shape'):
         part_shape = shape.shape
     else:
         part_shape = shape
     
-    # Always use bounding box for dimensions - works for both pristine beams and cut shapes
     bbox = part_shape.bounding_box()
     length = bbox.max.X - bbox.min.X
     width = bbox.max.Y - bbox.min.Y
@@ -47,24 +33,7 @@ def create_tenon_cut(
     tenon_length: float,
     at_start: bool = False,
 ) -> Part:
-    """Create material to remove around a centered tenon projection.
-    
-    Returns the "waste" shape that should be subtracted from the beam
-    to leave only the centered tenon projecting.
-    
-    Args:
-        beam_length: Length of the beam (X direction)
-        beam_width: Width of the beam (Y direction)
-        beam_height: Height of the beam (Z direction)
-        tenon_width: Width of the tenon (Y direction)
-        tenon_height: Height of the tenon (Z direction)
-        tenon_length: Length of the tenon projection (X direction)
-        at_start: If True, tenon at X=0; if False, tenon at X=beam_length
-    
-    Returns:
-        Part representing material to remove (full end section minus tenon)
-    """
-    # Calculate offsets to center the tenon
+    """Create the waste material to subtract for a centered tenon projection."""
     y_offset = (beam_width - tenon_width) / 2
     z_offset = (beam_height - tenon_height) / 2
     
@@ -92,7 +61,6 @@ def create_tenon_cut(
     )
     tenon_shape = tenon_shape.move(Location((x_pos, y_offset, z_offset)))
     
-    # Material to remove = end_section - tenon_shape
     return end_section - tenon_shape
 
 
@@ -104,19 +72,7 @@ def create_lap_cut(
     x_position: float,
     from_top: bool = True,
 ) -> Part:
-    """Create a rectangular lap cut volume.
-    
-    Args:
-        beam_width: Width of the beam (Y direction)
-        beam_height: Height of the beam (Z direction)
-        cut_depth: Depth of cut from surface
-        cut_length: Length of the cut (X direction)
-        x_position: X position where the cut starts (MIN aligned)
-        from_top: If True, cut from top; if False, cut from bottom
-    
-    Returns:
-        Part representing material to remove
-    """
+    """Create a rectangular lap cut volume to subtract from a beam."""
     if from_top:
         z_pos = beam_height - cut_depth
     else:
@@ -132,15 +88,7 @@ def create_lap_cut(
 
 
 def calculate_dovetail_taper(angle: float, length: float) -> float:
-    """Calculate the width increase for a dovetail given angle and length.
-    
-    Args:
-        angle: Dovetail angle in degrees
-        length: Length over which the taper occurs
-    
-    Returns:
-        Total taper (width increase on each side is half this value)
-    """
+    """Calculate total width increase for a dovetail taper."""
     return 2 * math.tan(math.radians(angle)) * length
 
 
@@ -154,18 +102,7 @@ def create_dovetail_cut(
 ) -> Part:
     """Create a tapered dovetail solid (wider at tip than base).
     
-    The shape starts at X=0 (narrow) and extends to X=length (wide).
-    
-    Args:
-        base_width: Width at base (narrow end, X=0)
-        height: Height of the dovetail (Z direction)
-        length: Length of the dovetail (X direction)
-        cone_angle: Angle of taper in degrees
-        y_center: Y position to center the shape on
-        z_center: Z position to center the shape on
-    
-    Returns:
-        Part representing the dovetail solid
+    Starts at X=0 (narrow, base_width) and extends to X=length (wide).
     """
     taper = math.tan(math.radians(cone_angle)) * length
     tip_width = base_width + 2 * taper
@@ -188,33 +125,9 @@ def create_dovetail_cut(
 def create_vertical_cut(post: Part, cut_class, at_top: bool = True, **cut_kwargs) -> Part:
     """Apply a horizontal joint cut class to a vertical post.
     
-    This utility rotates the post to horizontal orientation, applies the cut
-    using any joint class (Tenon, ShoulderedTenon, DovetailInsert, etc.),
-    then rotates the result back to vertical.
-    
-    Args:
-        post: The vertical post Part (oriented along Z axis)
-        cut_class: A joint class that takes a beam/Part as first argument
-                   (e.g., Tenon, ShoulderedTenon, DovetailInsert)
-        at_top: If True, cut at top of post (Z+); if False, cut at bottom (Z-)
-        **cut_kwargs: Additional keyword arguments passed to the cut class
-                      (e.g., tenon_width, tenon_height, tenon_length)
-    
-    Returns:
-        Post Part with the cut applied
-        
-    Example:
-        >>> from timber_joints.tenon import Tenon
-        >>> post_with_tenon = create_vertical_cut(
-        ...     post,
-        ...     Tenon,
-        ...     at_top=True,
-        ...     tenon_width=50,
-        ...     tenon_height=100,
-        ...     tenon_length=60,
-        ... )
+    Rotates the post to horizontal, applies the cut class (Tenon, ShoulderedTenon,
+    DovetailInsert, etc.), then rotates back to vertical.
     """
-    # Get post position for restoration
     bbox = post.bounding_box()
     original_min_x = bbox.min.X
     original_min_y = bbox.min.Y

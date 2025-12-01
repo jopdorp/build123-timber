@@ -10,18 +10,10 @@ from build123d import Location, Axis, Part, Plane
 class PositionedBrace:
     """A brace with its positioning and angle information.
     
-    This stores the brace Part along with the angle needed for creating
-    specialized tenon cuts. The tenon cuts have:
+    Stores the brace Part along with the angle needed for specialized tenon cuts:
     - One face aligned with the brace angle
     - Another face perpendicular to the post/beam/girt (90°)
     - The tip aligned with the post/beam/girt surface
-    
-    Attributes:
-        shape: The positioned brace Part
-        angle: Angle from horizontal in degrees (e.g., 45° for equal horizontal/vertical)
-        at_beam_end: True if brace is at beam end (right), False if at beam start (left)
-        brace_section: Cross-section size of the brace
-        axis: The horizontal axis along which the brace runs (Axis.X or Axis.Y)
     """
     shape: Part
     angle: float  # degrees from horizontal
@@ -31,17 +23,7 @@ class PositionedBrace:
 
 
 def get_tenon_penetration(brace_tenon: "BraceTenon") -> float:
-    """Get the penetration depth of a brace tenon into the receiving member.
-    
-    This is the distance the tenon extends into the receiving member,
-    measured perpendicular to the member's surface.
-    
-    Args:
-        brace_tenon: The BraceTenon object with cut geometry
-        
-    Returns:
-        Penetration depth in mm
-    """
+    """Get tenon penetration depth into the receiving member (perpendicular to surface)."""
     return brace_tenon.rotated_cut_bbox_width
 
 
@@ -54,49 +36,22 @@ def _calculate_brace_position_along_axis(
     at_member_start: bool,
     invert: bool = False,
 ) -> float:
-    """Calculate brace position along the horizontal axis (X or Y).
-    
-    This is a generic calculation that works for both X-axis (bent braces)
-    and Y-axis (girt braces). Y-axis braces use inverted logic.
-    
-    Args:
-        post_bbox_min: Post bounding box min along the axis
-        post_bbox_max: Post bounding box max along the axis
-        rot_bbox_min: Rotated brace bounding box min along the axis
-        rot_bbox_max: Rotated brace bounding box max along the axis
-        penetration: How far the tenon penetrates into the post
-        at_member_start: If True, brace at member start; if False, at member end
-        invert: If True, invert the start/end logic (used for Y-axis)
-        
-    Returns:
-        Target position for the brace along the axis
-    """
-    # For Y-axis, the geometry is inverted
+    """Calculate brace position along horizontal axis. Y-axis uses inverted logic."""
     use_start_logic = at_member_start if not invert else not at_member_start
     
     if use_start_logic:
-        # Brace tilts toward the start, post on start side
         post_inside = post_bbox_max
         return post_inside - rot_bbox_min - penetration
     else:
-        # Brace tilts toward the end, post on end side
         post_inside = post_bbox_min
         return post_inside - rot_bbox_max + penetration
 
 
 def _get_axis_values(bbox, axis: Axis) -> tuple[float, float]:
-    """Get min/max values along the specified axis from a bounding box.
-    
-    Args:
-        bbox: A bounding box with min/max attributes
-        axis: Axis.X or Axis.Y
-        
-    Returns:
-        (min_value, max_value) along the axis
-    """
+    """Get (min, max) values along the specified axis from a bounding box."""
     if axis == Axis.X:
         return bbox.min.X, bbox.max.X
-    else:  # Axis.Y
+    else:
         return bbox.min.Y, bbox.max.Y
 
 
@@ -110,16 +65,7 @@ def _calculate_brace_centering(
     rot_bbox_min: float,
     rot_bbox_max: float,
 ) -> float:
-    """Calculate brace position to center it on the post.
-    
-    Args:
-        post_center: Center of the post along the centering axis
-        rot_bbox_min: Rotated brace bounding box min along the centering axis
-        rot_bbox_max: Rotated brace bounding box max along the centering axis
-        
-    Returns:
-        Target position for the brace along the centering axis
-    """
+    """Calculate brace position to center it on the post."""
     rot_bbox_center = (rot_bbox_min + rot_bbox_max) / 2
     return post_center - rot_bbox_center
 
@@ -130,17 +76,7 @@ def _calculate_beam_position(
     drop_depth: float,
     at_start: bool,
 ) -> tuple[float, float, float]:
-    """Calculate where beam should be positioned relative to post at origin.
-    
-    Args:
-        beam: The beam Part
-        post: The vertical post Part (at origin)
-        drop_depth: How far the beam drops into the post
-        at_start: If True, joint at beam start; if False, at beam end
-    
-    Returns:
-        (target_x, target_y, target_z) for beam's bbox.min
-    """
+    """Calculate where beam should be positioned relative to post at origin."""
     beam_bbox = beam.bounding_box()
     post_bbox = post.bounding_box()
     
@@ -175,15 +111,6 @@ def _calculate_post_position(
     """Calculate where post should be positioned relative to beam at origin.
     
     The post is positioned so the beam end goes INTO the post (overlapping).
-    
-    Args:
-        beam: The beam Part (at origin)
-        post: The vertical post Part
-        drop_depth: How far the beam drops into the post
-        at_start: If True, joint at beam start; if False, at beam end
-    
-    Returns:
-        (target_x, target_y, target_z) for post's bbox.min
     """
     beam_bbox = beam.bounding_box()
     post_bbox = post.bounding_box()
@@ -214,15 +141,7 @@ def _calculate_post_position(
 
 
 def _move_shape_to_position(shape: Part, target_x: float, target_y: float, target_z: float) -> tuple[Part, Location]:
-    """Move a shape so its bounding box min aligns with target coordinates.
-    
-    Args:
-        shape: The Part to move
-        target_x, target_y, target_z: Target coordinates for bbox.min
-    
-    Returns:
-        (moved_shape, location)
-    """
+    """Move a shape so its bounding box min aligns with target coordinates."""
     bbox = shape.bounding_box()
     location = Location((
         target_x - bbox.min.X,
@@ -232,22 +151,8 @@ def _move_shape_to_position(shape: Part, target_x: float, target_y: float, targe
     return shape.move(location), location
 
 
-def align_beam_on_post(
-    beam: Part,
-    post: Part,
-) -> tuple[Part, Location]:
-    """Align a beam on top of a post.
-    
-    The beam is positioned horizontally on top of the vertical post,
-    with beam start at post edge.
-    
-    Args:
-        beam: The beam Part (with any joint cuts applied)
-        post: The post Part (already made vertical)
-    
-    Returns:
-        (positioned_beam, beam_location)
-    """
+def align_beam_on_post(beam: Part, post: Part) -> tuple[Part, Location]:
+    """Align a beam horizontally on top of a vertical post, with beam start at post edge."""
     beam_bbox = beam.bounding_box()
     post_bbox = post.bounding_box()
     
@@ -270,20 +175,7 @@ def align_beam_in_post(
     at_start: bool = True,
     move_post: bool = False,
 ) -> tuple[Part, Part, Location]:
-    """Align a beam dropped INTO a post (for tongue-and-fork style joints).
-    
-    The beam is positioned so it drops into the post by drop_depth.
-    
-    Args:
-        beam: The beam Part (with any joint cuts applied)
-        post: The post Part (already made vertical)
-        drop_depth: How far the beam drops into the post
-        at_start: If True, joint at beam start; if False, at beam end
-        move_post: If True, move post to beam; if False, move beam to post
-    
-    Returns:
-        (positioned_beam, positioned_post, location)
-    """
+    """Align a beam dropped INTO a post (for tongue-and-fork style joints)."""
     if move_post:
         # Keep beam at origin, move post to beam
         target_x, target_y, target_z = _calculate_post_position(beam, post, drop_depth, at_start)
@@ -297,14 +189,7 @@ def align_beam_in_post(
 
 
 def make_post_vertical(post_shape: Part) -> Part:
-    """Rotate a post to be vertical (length along Z axis).
-    
-    Args:
-        post_shape: The post Part in default orientation (length along X)
-    
-    Returns:
-        The post rotated to be vertical
-    """
+    """Rotate a post to be vertical (length along Z axis instead of X)."""
     return post_shape.rotate(Axis.Y, -90)
 
 
@@ -313,16 +198,9 @@ def create_receiving_cut(
     receiving_shape: Part,
     margin: float = 0.2,
 ) -> Part:
-    """Subtract the insert from the receiving shape to create a mortise/pocket.
+    """Subtract the insert from receiving shape to create a mortise/pocket.
     
-    Args:
-        positioned_insert: The insert Part (e.g., tenon) already positioned
-        receiving_shape: The receiving Part (e.g., post) to cut
-        margin: Gap to add around insert for clearance (default 0.2mm).
-                Positive values make the mortise larger than the tenon.
-                
-    Returns:
-        The receiving shape with the mortise cut
+    Positive margin makes the mortise larger than the tenon for clearance.
     """
     if margin > 0:
         from timber_joints.analysis import expand_shape_by_margin
@@ -340,22 +218,7 @@ def position_for_blind_mortise(
     at_start: bool = True,
     move_post: bool = False,
 ) -> tuple[Part, Part]:
-    """Position beam and post for cutting a blind mortise.
-    
-    Offsets the beam or post to create a mortise that doesn't go all the way through.
-    
-    Args:
-        beam: The beam Part (already positioned)
-        post: The post Part (already positioned)
-        tenon_length: Length of the tenon projection
-        housing_depth: Material to leave at far side of post (default 0)
-        post_top_extension: Extend cut above beam for housing (default 0)
-        at_start: If True, tenon at beam start; if False, at beam end
-        move_post: If True, move post instead of beam
-    
-    Returns:
-        (beam_for_cut, post_for_cut) - one moved for mortise cut, other unchanged
-    """
+    """Offset beam or post to create a blind mortise (doesn't go through)."""
     post_bbox = post.bounding_box()
     
     # Calculate post's X extent (thickness)
@@ -381,35 +244,13 @@ def position_for_blind_mortise(
         return beam_for_cut, post
 
 
-def calculate_brace_angle(
-    horizontal_distance: float,
-    vertical_distance: float,
-) -> float:
-    """Calculate the angle of a brace from horizontal.
-    
-    Args:
-        horizontal_distance: Horizontal span of the brace (X or Y direction)
-        vertical_distance: Vertical span of the brace (Z direction)
-    
-    Returns:
-        Angle in degrees from horizontal (0 = horizontal, 90 = vertical)
-    """
+def calculate_brace_angle(horizontal_distance: float, vertical_distance: float) -> float:
+    """Calculate brace angle from horizontal in degrees (0=horizontal, 90=vertical)."""
     return math.degrees(math.atan2(vertical_distance, horizontal_distance))
 
 
-def calculate_brace_length(
-    horizontal_distance: float,
-    vertical_distance: float,
-) -> float:
-    """Calculate the required length of a brace.
-    
-    Args:
-        horizontal_distance: Horizontal span of the brace (X or Y direction)
-        vertical_distance: Vertical span of the brace (Z direction)
-    
-    Returns:
-        Length of the brace (diagonal distance)
-    """
+def calculate_brace_length(horizontal_distance: float, vertical_distance: float) -> float:
+    """Calculate required brace length (diagonal distance)."""
     return math.sqrt(horizontal_distance**2 + vertical_distance**2)
 
 
@@ -426,29 +267,8 @@ def _create_brace(
 ) -> PositionedBrace:
     """Create and position a brace between a post and horizontal member.
     
-    This is the core brace creation function that handles both bent braces (X axis)
-    and girt braces (Y axis). The brace runs at the specified angle, with the
-    brace penetrating into the horizontal member until the lower corner of the brace
-    end touches the member bottom surface.
-    
-    The unified approach:
-    1. Create brace with tenons (always post tenon at start, member tenon at end)
-    2. Rotate to Y-axis if needed, then tilt at +/-angle based on orientation
-    3. Position using ONE formula that references the correct bbox corner
-    
-    Args:
-        post: The vertical post Part (already positioned)
-        horizontal_member: The horizontal beam/girt Part (already positioned)
-        brace_section: Cross-section size of the brace (width = height)
-        at_member_start: If True, brace at member start; if False, at member end
-        axis: Axis.X for bent braces, Axis.Y for girt braces
-        tenon_width: Width of tenon (default: brace_section / 3)
-        tenon_length: Length of tenon projection (default: 60mm)
-        angle: Brace angle from horizontal in degrees (default: 45.0)
-        brace_length: Length of the brace in mm (default: 707.0 for ~500mm run at 45°)
-    
-    Returns:
-        PositionedBrace with shape, angle, position info for tenon cuts
+    Handles both bent braces (X axis) and girt braces (Y axis). The brace penetrates
+    into the horizontal member until the lower corner touches the member bottom surface.
     """
     from timber_joints.beam import Beam
     from timber_joints.brace_tenon import BraceTenon
@@ -579,27 +399,8 @@ def create_brace_for_bent(
 ) -> PositionedBrace:
     """Create and position a brace between a post and beam in a bent.
     
-    This is a higher-level function that creates a brace of the right length
-    and positions it to connect a post to a beam. The brace runs at the specified
-    angle, with the brace penetrating into the beam until the lower corner
-    of the brace end touches the beam bottom surface.
-    
-    Args:
-        post: The vertical post Part (already positioned)
-        beam: The horizontal beam Part (already positioned)
-        brace_section: Cross-section size of the brace (width = height)
-        brace_length: Length of the brace (before tenon cuts)
-        at_beam_start: If True, brace at beam start (left post)
-                       If False, brace at beam end (right post)
-        tenon_width: Width of tenon (default: brace_section / 3)
-        tenon_height: Height of tenon (default: brace_section * 2/3)
-        tenon_length: Length of tenon projection (default: 60mm)
-        angle: Brace angle from horizontal in degrees (default: 45.0)
-    
-    Returns:
-        PositionedBrace with shape, angle, position info for tenon cuts
+    Brace penetrates into beam until lower corner touches beam bottom surface.
     """
-    # Pass the original angle - _create_brace handles the mirroring internally
     return _create_brace(
         post=post,
         horizontal_member=beam,
@@ -624,28 +425,10 @@ def create_brace_for_girt(
     tenon_length: float = 60.0,
     angle: float = 45.0,
 ) -> PositionedBrace:
-    """Create and position a brace between a post and girt.
+    """Create and position a brace between a post and girt (Y axis).
     
-    Similar to create_brace_for_bent, but for girts which run along the Y axis.
-    The brace runs at the specified angle, with the brace penetrating into 
-    the girt until the lower corner of the brace end touches the girt bottom.
-    
-    Args:
-        post: The vertical post Part (already positioned)
-        girt: The horizontal girt Part (already positioned, running along Y)
-        brace_section: Cross-section size of the brace (width = height)
-        brace_length: Length of the brace (before tenon cuts)
-        at_girt_start: If True, brace at girt start (toward -Y)
-                       If False, brace at girt end (toward +Y)
-        tenon_width: Width of tenon (default: brace_section / 3)
-        tenon_height: Height of tenon (default: brace_section * 2/3)
-        tenon_length: Length of tenon projection (default: 60mm)
-        angle: Brace angle from horizontal in degrees (default: 45.0)
-    
-    Returns:
-        PositionedBrace with shape, angle, position info for tenon cuts
+    Similar to create_brace_for_bent but for girts running along Y axis.
     """
-    # Pass the original angle - _create_brace handles the mirroring internally
     return _create_brace(
         post=post,
         horizontal_member=girt,
@@ -669,29 +452,10 @@ def  build_complete_bent(
     housing_depth: float = 20,
     post_top_extension: float = 300,
 ) -> tuple[Part, Part, Part, "Beam"]:
-    """Build a complete bent with shouldered tenon joints.
+    """Build a complete bent (two posts + beam) with shouldered tenon joints.
     
-    Creates two posts with a beam connected by shouldered tenon joints.
-    The beam has tenons on both ends, and mortises are cut in the posts.
-    
-    Args:
-        post_height: Height of the posts (length before rotation)
-        post_section: Cross-section size of posts (width = height)
-        beam_length: Length of the connecting beam
-        beam_section: Cross-section size of beam (defaults to post_section)
-        tenon_length: Length of tenon projections
-        shoulder_depth: Depth of angled shoulder on tenon
-        housing_depth: Material left at far side of mortise
-        post_top_extension: Extra mortise height above beam for housing
-        
-    Returns:
-        (left_post_with_mortise, right_post_with_mortise, positioned_beam, beam)
-        - left_post_with_mortise: Left post Part with mortise cut
-        - right_post_with_mortise: Right post Part with mortise cut  
-        - positioned_beam: Beam Part in final position (with tenons on both ends)
-        - beam: Original Beam object (for FEA mesh generation)
+    Returns (left_post, right_post, positioned_beam, original_beam).
     """
-    # Import here to avoid circular imports
     from timber_joints.beam import Beam
     from timber_joints.shouldered_tenon import ShoulderedTenon
     

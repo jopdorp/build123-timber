@@ -9,19 +9,10 @@ from timber_joints.utils import create_tenon_cut
 
 @dataclass
 class ShoulderedTenon(BaseJoint):
-    """A tenon with an angled shoulder - inserting part only.
+    """Tenon with an angled (wedge-shaped) shoulder.
     
-    Creates a tenon with a triangular/angled shoulder. The shoulder surface
-    is angled - one side is at the tenon base (flush), the other side is 
-    cut back by shoulder_depth. This creates a wedge-shaped shoulder.
-    
-    Parameters:
-    - beam: The beam (Beam object or Part) to cut the shouldered tenon on
-    - tenon_width: Width of the tenon projection (Y direction)
-    - tenon_height: Height of the tenon projection (Z direction)
-    - tenon_length: How far the tenon extends from the flush side of shoulder
-    - shoulder_depth: Depth of the angled shoulder at the deep side
-    - at_start: If True, create at start (X=0); if False, at end (X=length)
+    The shoulder surface is angled - one side flush with tenon base,
+    the other cut back by shoulder_depth. Creates a wedge-shaped shoulder.
     """
     
     tenon_width: float
@@ -31,7 +22,6 @@ class ShoulderedTenon(BaseJoint):
     at_start: bool = False
 
     def __post_init__(self) -> None:
-        """Validate shouldered tenon parameters."""
         super().__post_init__()
         
         if self.tenon_width <= 0 or self.tenon_width > self._width:
@@ -48,12 +38,7 @@ class ShoulderedTenon(BaseJoint):
             raise ValueError(f"Total length (tenon + shoulder = {total_length}) exceeds beam length ({self._length})")
 
     def _create_shoulder_wedge(self, x_deep: float, x_flush: float) -> Part:
-        """Create the triangular wedge shape for the angled shoulder.
-        
-        The wedge is deeper at bottom (Z=0), flush at top (Z=height).
-        """
-        # Triangular wedge: deep at bottom (Z=0), flush at top
-        # Points ordered counter-clockwise when viewed from +Y
+        """Create the triangular wedge shape for the angled shoulder (deeper at Z=0, flush at Z=height)."""
         profile_points = [
             (x_deep, 0, 0),                # Deep X, bottom Z
             (x_deep, 0, self._height),     # Deep X, top Z
@@ -68,8 +53,6 @@ class ShoulderedTenon(BaseJoint):
 
     @property
     def shape(self) -> Part:
-        """Create the shouldered tenon with angled shoulder."""
-        # Calculate positions using actual bbox boundaries (not assuming X starts at 0)
         if self.at_start:
             x_deep = self._bbox_min_x
             x_flush = self._bbox_min_x + self.shoulder_depth
@@ -107,29 +90,18 @@ class ShoulderedTenon(BaseJoint):
 
     @property 
     def shoulder_angle(self) -> float:
-        """Return the shoulder angle in degrees."""
         return math.degrees(math.atan2(self.shoulder_depth, self._height))
 
     @property
     def rotated_cut_bbox_height(self) -> float:
-        """Return the vertical penetration depth when the tenon is rotated by shoulder angle.
-        
-        This is how far the brace end extends vertically (Z) when the brace is tilted.
-        Use this for penetration into horizontal members (beams/girts).
-        Includes both tenon_length and shoulder_depth.
-        """
+        """Vertical penetration depth when tenon is rotated by shoulder angle (for horizontal members)."""
         angle_rad = math.radians(self.shoulder_angle)
         total_cut_length = self.tenon_length + self.shoulder_depth
         return total_cut_length * math.sin(angle_rad)
 
     @property
     def rotated_cut_bbox_width(self) -> float:
-        """Return the horizontal penetration depth when the tenon is rotated by shoulder angle.
-        
-        This is how far the brace end extends horizontally (X or Y) when the brace is tilted.
-        Use this for penetration into vertical members (posts).
-        Includes both tenon_length and shoulder_depth.
-        """
+        """Horizontal penetration depth when tenon is rotated by shoulder angle (for vertical members)."""
         angle_rad = math.radians(self.shoulder_angle)
         total_cut_length = self.tenon_length + self.shoulder_depth
         return total_cut_length * math.cos(angle_rad)

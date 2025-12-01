@@ -8,24 +8,13 @@ from timber_joints.utils import create_lap_cut
 
 @dataclass
 class LapJoint(BaseJoint):
-    """The positive (inserting) part of a lap joint.
-    
-    This is the beam end that has material removed from one side,
-    allowing it to insert into a matching cut in another beam.
-    
-    Parameters:
-    - beam: The beam (Beam object or Part) to cut the lap joint on
-    - cut_depth: How deep to cut into the beam (typically half the beam height)
-    - cut_length: How long the lap cut extends along the beam
-    - from_top: If True, cut from top face; if False, cut from bottom face
-    """
+    """Beam end with material removed from one side for lap joints."""
     
     cut_depth: float
     cut_length: float
     from_top: bool = True
 
     def __post_init__(self) -> None:
-        """Validate lap joint parameters."""
         super().__post_init__()
         
         if self.cut_depth <= 0 or self.cut_depth >= self._height:
@@ -35,8 +24,6 @@ class LapJoint(BaseJoint):
 
     @property
     def shape(self) -> Part:
-        """Create the lap joint shape by removing material from beam end."""
-        # Cut at end of beam
         x_pos = self._length - self.cut_length
         
         cut = create_lap_cut(

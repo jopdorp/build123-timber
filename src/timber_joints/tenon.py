@@ -8,18 +8,7 @@ from timber_joints.utils import create_tenon_cut
 
 @dataclass
 class Tenon(BaseJoint):
-    """The positive (inserting) part of a mortise and tenon joint.
-    
-    Creates a tenon by removing material around it, leaving a centered
-    projection at the beam end.
-    
-    Parameters:
-    - beam: The beam (Beam object or Part) to cut the tenon on
-    - tenon_width: Width of the tenon (Y direction)
-    - tenon_height: Height of the tenon (Z direction)
-    - tenon_length: How far the tenon extends from the beam end
-    - at_start: If True, create tenon at start (X=0); if False, at end (X=length)
-    """
+    """Centered tenon projection at beam end (removes material around the tenon)."""
     
     tenon_width: float
     tenon_height: float
@@ -27,7 +16,6 @@ class Tenon(BaseJoint):
     at_start: bool = False
 
     def __post_init__(self) -> None:
-        """Validate tenon parameters."""
         super().__post_init__()
         
         if self.tenon_width <= 0 or self.tenon_width > self._width:
@@ -39,7 +27,6 @@ class Tenon(BaseJoint):
 
     @property
     def shape(self) -> Part:
-        """Create the tenon by removing material around the centered projection."""
         waste = create_tenon_cut(
             beam_length=self._length,
             beam_width=self._width,
