@@ -115,5 +115,20 @@ result = run_fea_analysis(
 )
 
 # %%
-# Visualize FEA results
-visualize_fea_results(result, output_dir, cad_shapes, scale=60.0)
+# Visualize FEA results (can re-run this cell without re-running analysis)
+# Load results from file if not in memory
+from fea_utils import visualize_fea_results, show_fea_results
+
+output_dir = Path(__file__).parent / "fea_barn_braced_output"
+
+# Check if we have results in memory, otherwise create a minimal result object
+if 'result' not in dir() or result is None:
+    # Create a simple namespace to hold success status
+    class LoadedResult:
+        success = (output_dir / "analysis.frd").exists()
+    result = LoadedResult()
+    print(f"Loaded result from file (success={result.success})")
+
+visualize_fea_results(result, output_dir, cad_shapes, scale=5.0)
+
+# %%
