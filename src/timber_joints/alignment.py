@@ -1,5 +1,6 @@
 """Alignment utilities for positioning timber joints."""
 
+import copy
 import math
 from dataclasses import dataclass, field
 from typing import Optional, List, Type, TYPE_CHECKING
@@ -744,9 +745,9 @@ def add_girts_to_bents(
     
     # Cut mortises in girts for each bent's posts
     for bent, y_pos in zip(bents, y_positions):
-        # Move bent posts to their Y position for the cut
-        left_post_at_y = bent.left_post.move(Location((0, y_pos, 0)))
-        right_post_at_y = bent.right_post.move(Location((0, y_pos, 0)))
+        # Move bent posts to their Y position for the cut (deepcopy to avoid mutating original)
+        left_post_at_y = copy.deepcopy(bent.left_post).move(Location((0, y_pos, 0)))
+        right_post_at_y = copy.deepcopy(bent.right_post).move(Location((0, y_pos, 0)))
         left_girt = create_receiving_cut(left_post_at_y, left_girt)
         right_girt = create_receiving_cut(right_post_at_y, right_girt)
     
@@ -755,9 +756,9 @@ def add_girts_to_bents(
     if brace_params is not None:
         num_bents = len(bents)
         for i, (bent, y_pos) in enumerate(zip(bents, y_positions)):
-            # Move posts to Y position for brace creation
-            left_post_at_y = bent.left_post.move(Location((0, y_pos, 0)))
-            right_post_at_y = bent.right_post.move(Location((0, y_pos, 0)))
+            # Move posts to Y position for brace creation (deepcopy to avoid mutating original)
+            left_post_at_y = copy.deepcopy(bent.left_post).move(Location((0, y_pos, 0)))
+            right_post_at_y = copy.deepcopy(bent.right_post).move(Location((0, y_pos, 0)))
             
             # Determine brace directions based on position
             # First bent: braces toward +Y only

@@ -95,14 +95,13 @@ print(f"  - Left girt at Y={left_girt_y_threequarter:.1f}mm: 50 kg sideways (+X)
 print(f"  - Self-weight: automatic")
 print()
 
-# Uncomment to run analysis:
-# result = frame.analyze(
-#     additional_loads=additional_loads,
-#     output_dir=output_dir,
-#     mesh_size=100.0,
-#     mesh_size_fine=50.0,
-# )
-# 
-# print(f"Success: {result.success}")
-# if result.success:
-#     print(f"Max deflection: {result.fea_results.max_displacement:.4f} mm")
+result = frame.analyze(
+    additional_loads=additional_loads,
+    output_dir=output_dir,
+    mesh_size=100.0,
+    mesh_size_fine=50.0,
+)
+
+print(f"Success: {result.success}")
+if result.success:
+    print(f"Max deflection: {result.fea_results.max_displacement:.4f} mm")

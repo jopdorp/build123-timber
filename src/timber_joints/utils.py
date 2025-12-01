@@ -1,5 +1,6 @@
 """Utility functions for timber joints."""
 
+import copy
 import math
 from typing import Tuple
 from build123d import Align, Axis, Box, Part, Location, Polyline, make_face, extrude, loft, Sketch, Rectangle, Plane
@@ -128,6 +129,9 @@ def create_vertical_cut(post: Part, cut_class, at_top: bool = True, **cut_kwargs
     Rotates the post to horizontal, applies the cut class (Tenon, ShoulderedTenon,
     DovetailInsert, etc.), then rotates back to vertical.
     """
+    # Deep copy to avoid mutating the original (build123d's move() mutates in place)
+    post = copy.deepcopy(post)
+    
     bbox = post.bounding_box()
     original_min_x = bbox.min.X
     original_min_y = bbox.min.Y

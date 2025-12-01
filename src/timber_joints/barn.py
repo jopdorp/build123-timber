@@ -6,6 +6,7 @@ A barn frame consists of:
 - Knee braces for lateral stability (both in bents and under girts)
 """
 
+import copy
 from dataclasses import dataclass, field
 from typing import Optional
 from build123d import Part, Location
@@ -124,6 +125,7 @@ class Bent:
     """A single bent (portal frame) with optional braces.
     
     This wraps BentResult with Y position information for barn assembly.
+    Note: Properties return deep copies to avoid mutation from build123d's move().
     """
     result: BentResult
     y_position: float = 0
@@ -131,31 +133,31 @@ class Bent:
     @property
     def left_post(self) -> Part:
         """Left post at Y position."""
-        return self.result.left_post.move(Location((0, self.y_position, 0)))
+        return copy.deepcopy(self.result.left_post).move(Location((0, self.y_position, 0)))
     
     @property
     def right_post(self) -> Part:
         """Right post at Y position."""
-        return self.result.right_post.move(Location((0, self.y_position, 0)))
+        return copy.deepcopy(self.result.right_post).move(Location((0, self.y_position, 0)))
     
     @property
     def beam(self) -> Part:
         """Beam at Y position."""
-        return self.result.beam.move(Location((0, self.y_position, 0)))
+        return copy.deepcopy(self.result.beam).move(Location((0, self.y_position, 0)))
     
     @property
     def brace_left(self) -> Optional[Part]:
         """Left brace at Y position, or None."""
         if self.result.brace_left is None:
             return None
-        return self.result.brace_left.move(Location((0, self.y_position, 0)))
+        return copy.deepcopy(self.result.brace_left).move(Location((0, self.y_position, 0)))
     
     @property
     def brace_right(self) -> Optional[Part]:
         """Right brace at Y position, or None."""
         if self.result.brace_right is None:
             return None
-        return self.result.brace_right.move(Location((0, self.y_position, 0)))
+        return copy.deepcopy(self.result.brace_right).move(Location((0, self.y_position, 0)))
 
 
 @dataclass
