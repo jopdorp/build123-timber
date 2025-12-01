@@ -75,6 +75,7 @@ class GirtResult:
     """Result from adding girts to bents."""
     left_girt: Part
     right_girt: Part
+    updated_bents: List["BentResult"]  # Bents with tenons cut for girt connection
     braces: List[tuple[str, Part]] = field(default_factory=list)
 
 
@@ -801,5 +802,6 @@ def add_girts_to_bents(
     return GirtResult(
         left_girt=left_girt,
         right_girt=right_girt,
+        updated_bents=bents,  # Bents with tenons cut into post tops
         braces=braces,
     )

@@ -98,8 +98,6 @@ print()
 result = frame.analyze(
     additional_loads=additional_loads,
     output_dir=output_dir,
-    mesh_size=100.0,
-    mesh_size_fine=50.0,
 )
 
 print(f"Success: {result.success}")

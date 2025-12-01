@@ -235,6 +235,10 @@ class BarnFrame:
             joint_params=config.get_joint_params(),
             brace_params=config.get_girt_brace_params(),
         )
+        
+        # Update bents with the versions that have tenons cut for girt connection
+        for i, updated_bent in enumerate(self.girt_result.updated_bents):
+            self.bents[i] = Bent(result=updated_bent, y_position=y_positions[i])
     
     def all_parts(self) -> list[tuple[Part, str]]:
         parts = []

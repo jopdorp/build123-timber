@@ -83,8 +83,8 @@ print()
 result = frame.analyze(
     additional_loads=additional_loads,
     output_dir=output_dir,
-    mesh_size=70.0,
-    mesh_size_fine=30.0,
+    mesh_size=200.0,
+    mesh_size_fine=60.0,
 )
 
 print("\n" + "=" * 60)
