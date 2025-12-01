@@ -52,6 +52,7 @@ print(barn.summary())
 
 # %%
 # Visualize CAD, mesh, and contacts
+# Use coarser mesh for this larger problem (25 parts, 58 contacts)
 frame = barn.to_fea_frame()
 
 cad_shapes = [(part, name, "sienna" if "post" in name else ("orange" if "brace" in name else "burlywood")) 
@@ -64,6 +65,8 @@ visualize_frame_with_mesh(
     cad_offset=0,
     mesh_offset=6000,
     contact_offset=12000,
+    element_size=200.0,       # Coarser base mesh (was 150)
+    element_size_fine=60.0,   # Coarser contact refinement (was 40)
 )
 
 # %%
@@ -98,7 +101,7 @@ print(f"  - Self-weight: automatic")
 print()
 
 # %%
-# Run FEA analysis
+# Run FEA analysis with coarser mesh
 output_dir = Path(__file__).parent / "fea_barn_braced_output"
 
 result = run_fea_analysis(
@@ -107,6 +110,8 @@ result = run_fea_analysis(
     title="3-BENT BARN FRAME FEA ANALYSIS (WITH BRACES)",
     additional_loads=additional_loads,
     reference_length=config.beam_length,
+    mesh_size=200.0,       # Coarser base mesh (was 150)
+    mesh_size_fine=60.0,   # Coarser contact refinement (was 40)
 )
 
 # %%

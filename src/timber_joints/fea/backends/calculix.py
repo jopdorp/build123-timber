@@ -14,7 +14,9 @@ Requirements:
 - For MFront materials: CalculiX compiled with UMAT support
 """
 
+import os
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -117,13 +119,23 @@ class CalculiXInput:
         interaction: str,
         slave_surface: str,
         master_surface: str,
-        adjust: float,
+        adjust: float = None,
     ) -> "CalculiXInput":
-        """Add contact pair definition."""
-        self.lines.extend([
-            f"*CONTACT PAIR, INTERACTION={interaction}, TYPE=SURFACE TO SURFACE, ADJUST={adjust}",
-            f"{slave_surface}, {master_surface}",
-        ])
+        """Add contact pair definition.
+        
+        Args:
+            adjust: If None or 0, contact establishes naturally under load.
+                   If positive, slave nodes are moved toward master at start.
+        """
+        if adjust:
+            self.lines.append(
+                f"*CONTACT PAIR, INTERACTION={interaction}, TYPE=SURFACE TO SURFACE, ADJUST={adjust}"
+            )
+        else:
+            self.lines.append(
+                f"*CONTACT PAIR, INTERACTION={interaction}, TYPE=SURFACE TO SURFACE"
+            )
+        self.lines.append(f"{slave_surface}, {master_surface}")
         return self
     
     def add_boundary(
@@ -158,18 +170,7 @@ class CalculiXInput:
         return self
     
     def add_contact_controls(self) -> "CalculiXInput":
-        """Add contact convergence controls.
-        
-        Parameters: delcon, alea, kscalemax, itf2f
-        - delcon: relative penetration reduction target (0.005 = 0.5%)
-        - alea: random perturbation for contact detection (0.1)
-        - kscalemax: max penalty scaling factor (50 - lower for stability)
-        - itf2f: face-to-face iterations (100 - fewer needed with good mesh)
-        """
-        self.lines.extend([
-            "*CONTROLS, PARAMETERS=CONTACT",
-            "0.005, 0.1, 50, 100",
-        ])
+        """Default contact controls of CalculiX are fine."""
         return self
     
     def add_cload(
@@ -212,11 +213,29 @@ class CalculiXInput:
         return filepath
 
 
+# Path to PARDISO-enabled CalculiX binary (compiled with Intel MKL)
+# DISABLED: PARDISO binary crashes with segfault on contact problems
+# The bug appears when factoring unsymmetric matrices from contact
+# Fall back to system 'ccx' which uses SPOOLES (works reliably)
+PARDISO_CCX_PATH = Path("/nonexistent")  # Force use of system ccx (SPOOLES)
+# PARDISO_CCX_PATH = Path.home() / "development/calculix/bin/ccx_2.22_pardiso"
+
 def run_ccx(
     input_file: Path,
     timeout: int = 600,
+    num_threads: int = 16,
+    stream_output: bool = True,
 ) -> tuple[bool, str, str]:
-    """Run CalculiX solver.
+    """Run CalculiX solver with PARDISO support.
+    
+    Uses the PARDISO-enabled binary for parallel matrix solving.
+    Set OMP_NUM_THREADS for multi-threaded solving.
+    
+    Args:
+        input_file: Path to .inp file
+        timeout: Max runtime in seconds
+        num_threads: Number of OpenMP threads for PARDISO
+        stream_output: If True, stream output directly to terminal
     
     Returns:
         (success, stdout, stderr)
@@ -225,22 +244,66 @@ def run_ccx(
     work_dir = input_file.parent
     job_name = input_file.stem
     
-    cmd = ["ccx", "-i", job_name]
+    # Use PARDISO binary if available, otherwise fall back to system ccx
+    if PARDISO_CCX_PATH.exists():
+        ccx_cmd = str(PARDISO_CCX_PATH)
+    else:
+        ccx_cmd = "ccx"
+    
+    cmd = [ccx_cmd, "-i", job_name]
+    
+    # Set up environment with OpenMP threads
+    env = os.environ.copy()
+    env["OMP_NUM_THREADS"] = str(num_threads)
     
     try:
-        result = subprocess.run(
-            cmd,
-            cwd=work_dir,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        success = result.returncode == 0
-        return success, result.stdout, result.stderr
+        if stream_output:
+            # Stream output directly to terminal for real-time feedback
+            process = subprocess.Popen(
+                cmd,
+                cwd=work_dir,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+            )
+            
+            stdout_lines = []
+            stderr_lines = []
+            
+            # Read stdout line by line and print immediately
+            for line in process.stdout:
+                print(line, end='', flush=True)
+                stdout_lines.append(line)
+            
+            # Wait for process to complete and get stderr
+            process.wait(timeout=timeout)
+            stderr_output = process.stderr.read()
+            if stderr_output:
+                print(stderr_output, file=sys.stderr)
+                stderr_lines.append(stderr_output)
+            
+            success = process.returncode == 0
+            return success, ''.join(stdout_lines), ''.join(stderr_lines)
+        else:
+            # Capture output without streaming
+            result = subprocess.run(
+                cmd,
+                cwd=work_dir,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            success = result.returncode == 0
+            return success, result.stdout, result.stderr
     except subprocess.TimeoutExpired:
+        if stream_output and 'process' in locals():
+            process.kill()
         return False, "", "Solver timeout exceeded"
     except FileNotFoundError:
-        return False, "", "CalculiX (ccx) not found in PATH"
+        return False, "", f"CalculiX not found. Tried: {ccx_cmd}"
 
 
 def read_frd_displacements(frd_file: Path) -> Dict[int, tuple[float, float, float]]:
@@ -323,7 +386,11 @@ class CalculiXBackend(BaseSolverBackend):
         return SolverType.CALCULIX
     
     def is_available(self) -> bool:
-        """Check if CalculiX is installed."""
+        """Check if CalculiX is installed (PARDISO or system version)."""
+        # First check for PARDISO-enabled binary
+        if PARDISO_CCX_PATH.exists():
+            return True
+        # Fall back to system ccx
         try:
             result = subprocess.run(
                 ["ccx", "-v"],
@@ -386,12 +453,14 @@ class CalculiXBackend(BaseSolverBackend):
         
         # Run solver
         if verbose:
-            print("\nRunning CalculiX solver...")
+            ccx_type = "PARDISO" if PARDISO_CCX_PATH.exists() else "standard"
+            print(f"\nRunning CalculiX solver ({ccx_type})...")
+            print("="*60)
         
-        success, stdout, stderr = run_ccx(input_file)
+        success, stdout, stderr = run_ccx(input_file, stream_output=verbose)
         
         if verbose:
-            print(stdout)
+            print("="*60)
             if stderr:
                 print(f"STDERR: {stderr}")
         

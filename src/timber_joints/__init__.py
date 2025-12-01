@@ -23,6 +23,11 @@ from timber_joints.alignment import (
     PositionedBrace,
 )
 from timber_joints.utils import get_shape_dimensions
+from timber_joints.config import (
+    MORTISE_CLEARANCE,
+    TimberJointConfig,
+    DEFAULT_CONFIG,
+)
 
 # Frame assembly
 from timber_joints.frame import (
@@ -62,6 +67,10 @@ from timber_joints.fea.meshing import (
 )
 
 __all__ = [
+    # Config
+    "MORTISE_CLEARANCE",
+    "TimberJointConfig",
+    "DEFAULT_CONFIG",
     # Core
     "BaseJoint",
     "Beam",

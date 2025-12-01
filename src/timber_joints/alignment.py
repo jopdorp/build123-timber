@@ -269,12 +269,16 @@ def make_post_vertical(post_shape: Part) -> Part:
 def create_receiving_cut(
     positioned_insert: Part,
     receiving_shape: Part,
-    margin: float = 0.2,
+    margin: float = None,
 ) -> Part:
     """Subtract the insert from receiving shape to create a mortise/pocket.
     
     Positive margin makes the mortise larger than the tenon for clearance.
+    If margin is None, uses the central config's cad_cut_margin.
     """
+    if margin is None:
+        from timber_joints.config import DEFAULT_CONFIG
+        margin = DEFAULT_CONFIG.cad_cut_margin
     if margin > 0:
         from timber_joints.utils import expand_shape_by_margin
         insert_with_margin = expand_shape_by_margin(positioned_insert, margin)

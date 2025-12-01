@@ -594,7 +594,12 @@ class MeshingConfig:
     element_size: float = 150.0       # Base element size (mm) - coarse for bulk
     element_size_fine: float = 40.0   # Fine mesh at contacts (mm) - ~1-2 per contact
     refinement_margin: float = 20.0   # Expand refinement regions (mm)
-    contact_gap: float = 0.5          # Gap tolerance for contact detection (mm)
+    contact_gap: float = None         # Gap tolerance for contact detection (from config if None)
+    
+    def __post_init__(self):
+        if self.contact_gap is None:
+            from timber_joints.config import DEFAULT_CONFIG
+            self.contact_gap = DEFAULT_CONFIG.mesh_contact_tolerance
 
 
 @dataclass

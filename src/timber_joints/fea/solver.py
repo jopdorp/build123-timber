@@ -81,15 +81,21 @@ class ContactPair:
 class ContactParameters:
     """Parameters for frictional contact.
     
-    For timber joints with well-meshed contact regions, higher penalty
-    values give faster convergence (stiffer contact). The stick_slope 
-    should be proportional to normal_penalty.
+    For timber joints with contact regions.
+    Default values derived from central config.
     """
     friction_coeff: float = 0.35
-    normal_penalty: float = 100.0    # MPa/mm - higher penalty for faster convergence
+    normal_penalty: float = 100.0    # MPa/mm - stiffer contact
     stick_slope: float = 100.0       # Match normal_penalty
-    stabilize: float = 0.01          # Stabilization for complex contacts
-    adjust: float = 1.0              # mm - adjustment distance for initial penetration
+    stabilize: float = 0.01          # Low stabilization - let contact converge naturally
+    adjust: float = None             # mm - adjustment distance (from config if None)
+    
+    def __post_init__(self):
+        # Small ADJUST needed to establish initial contact, but keep it minimal
+        # to avoid artificial strain. Derived from mortise clearance.
+        if self.adjust is None:
+            from timber_joints.config import DEFAULT_CONFIG
+            self.adjust = DEFAULT_CONFIG.contact_adjust
 
 
 # Node filter function signature
@@ -149,15 +155,13 @@ class MeshConfig:
 class StepConfig:
     """Analysis step configuration.
     
-    For contact problems with well-refined meshes at contact regions,
-    larger increments can work. The solver will automatically cut back
-    if needed.
+    For contact problems - moderate increments for stability.
     """
-    initial_increment: float = 0.1   # Start with 10% of load (larger since mesh is good)
+    initial_increment: float = 0.2   # Start with 20% of load
     total_time: float = 1.0
-    min_increment: float = 0.005     # 0.5% min - if smaller needed, won't converge anyway
-    max_increment: float = 0.2       # Allow larger steps (up from 0.1)
-    max_increments: int = 200        # Fewer iterations needed with better convergence
+    min_increment: float = 0.01     # Allow very small increments if needed
+    max_increment: float = 0.5       # Larger steps to reach ~5 increments
+    max_increments: int = 100        # Enough increments
     nonlinear_geometry: bool = True
 
 
@@ -181,7 +185,7 @@ class AnalysisConfig:
     
     # Contact parameters
     contact: ContactParameters = None
-    contact_gap: float = 0.5  # mm
+    contact_gap: float = None  # mm, from central config
     
     # Mesh settings
     mesh: MeshConfig = None
@@ -196,10 +200,13 @@ class AnalysisConfig:
     output_dir: Path = None
     
     def __post_init__(self):
+        from ..config import DEFAULT_CONFIG
         if self.default_material is None:
             self.default_material = get_default_material()
         if self.contact is None:
             self.contact = ContactParameters()
+        if self.contact_gap is None:
+            self.contact_gap = DEFAULT_CONFIG.contact_gap
         if self.mesh is None:
             self.mesh = MeshConfig()
         if self.step is None:

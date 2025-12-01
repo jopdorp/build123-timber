@@ -154,8 +154,6 @@ def run_fea_analysis(
     additional_loads: Optional[List[LoadBC]] = None,
     mesh_size: float = 150.0,
     mesh_size_fine: float = 40.0,
-    initial_increment: float = 0.1,
-    max_increments: int = 200,
     reference_length: Optional[float] = None,
     verbose: bool = True,
 ):
@@ -185,8 +183,6 @@ def run_fea_analysis(
         output_dir=output_dir,
         mesh_size=mesh_size,
         mesh_size_fine=mesh_size_fine,
-        initial_increment=initial_increment,
-        max_increments=max_increments,
         verbose=verbose,
     )
     

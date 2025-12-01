@@ -13,6 +13,7 @@ from typing import List, Optional, Callable, Tuple
 
 from build123d import Part
 
+from ..config import DEFAULT_CONFIG
 from .assembly import (
     FEAPart,
     ContactPair,
@@ -36,7 +37,6 @@ from .meshing import (
     build_mesh_faces_compound,
     get_boundary_faces,
 )
-from .solver import StepConfig
 
 class MemberType(Enum):
     """Type of structural member based on orientation."""
@@ -116,8 +116,12 @@ class TimberFrame:
     - Self-weight loads distributed across members
     """
     members: List[FrameMember] = field(default_factory=list)
-    contact_gap: float = 0.5  # Gap for contact analysis
+    contact_gap: float = None  # Gap for contact analysis, from central config
     timber_density: float = 500.0  # kg/m³
+    
+    def __post_init__(self):
+        if self.contact_gap is None:
+            self.contact_gap = DEFAULT_CONFIG.contact_gap
     _meshing_result: Optional[MeshingResult] = field(default=None, repr=False)
     
     # Physical constants
@@ -415,8 +419,6 @@ class TimberFrame:
         include_self_weight: bool = True,
         mesh_size: float = 150.0,
         mesh_size_fine: float = 40.0,
-        initial_increment: float = 0.1,
-        max_increments: int = 200,
         output_dir: Path = None,
         verbose: bool = True,
     ) -> AssemblyResult:
@@ -438,9 +440,6 @@ class TimberFrame:
             include_self_weight: Include self-weight of timber members (default True)
             mesh_size: Base mesh element size (mm)
             mesh_size_fine: Fine mesh at contacts (mm)
-            initial_increment: Initial load increment (0.0-1.0). Default 0.1 (10%).
-                             Solver will automatically cut back if needed.
-            max_increments: Maximum solver iterations. Default 200.
             output_dir: Directory for output files
             verbose: Print progress
             
@@ -529,16 +528,11 @@ class TimberFrame:
             verbose=verbose,
         )
         
-        # Configure and run
-        step_config = StepConfig(
-            initial_increment=initial_increment,
-            max_increments=max_increments,
-        )
+        # Configure and run - use default StepConfig
         config = AssemblyConfig(
             mesh_size=mesh_size,
             mesh_size_fine=mesh_size_fine,
             contact_gap=self.contact_gap,
-            step=step_config,
             output_dir=output_dir,
         )
         

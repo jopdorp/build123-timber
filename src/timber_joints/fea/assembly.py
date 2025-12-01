@@ -105,11 +105,12 @@ class AssemblyConfig:
     """Configuration for assembly FEA analysis.
     
     Default mesh sizes tuned for timber frames (5m span, ~50mm contacts).
+    Contact parameters derived from central config.
     """
     mesh_size: float = 150.0  # Coarse base mesh for bulk material
     mesh_size_fine: float = 40.0  # Fine mesh at contact surfaces (~1-2 per contact)
     refinement_margin: float = 20.0  # Margin around contact regions
-    contact_gap: float = 0.5
+    contact_gap: float = None  # CalculiX contact gap c0 (from config if None)
     
     material: TimberMaterial = None
     contact: ContactParameters = None
@@ -118,6 +119,9 @@ class AssemblyConfig:
     output_dir: Path = None
     
     def __post_init__(self):
+        from timber_joints.config import DEFAULT_CONFIG
+        if self.contact_gap is None:
+            self.contact_gap = DEFAULT_CONFIG.contact_gap
         if self.material is None:
             self.material = get_default_material()
         if self.contact is None:
