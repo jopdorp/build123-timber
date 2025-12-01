@@ -399,8 +399,8 @@ class TimberFrame:
         include_self_weight: bool = True,
         mesh_size: float = 150.0,
         mesh_size_fine: float = 40.0,
-        initial_increment: float = 0.05,
-        max_increments: int = 500,
+        initial_increment: float = 0.1,
+        max_increments: int = 200,
         output_dir: Path = None,
         verbose: bool = True,
     ) -> AssemblyResult:
@@ -422,8 +422,8 @@ class TimberFrame:
             include_self_weight: Include self-weight of timber members (default True)
             mesh_size: Base mesh element size (mm)
             mesh_size_fine: Fine mesh at contacts (mm)
-            initial_increment: Initial load increment (0.0-1.0). Lower values (0.01-0.05)
-                             help convergence for contact problems. Default 0.05.
+            initial_increment: Initial load increment (0.0-1.0). Default 0.1 (10%).
+                             Solver will automatically cut back if needed.
             max_increments: Maximum solver iterations. Default 200.
             output_dir: Directory for output files
             verbose: Print progress
