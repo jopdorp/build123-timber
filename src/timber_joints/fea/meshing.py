@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict
 import gmsh
 
 from build123d import Compound
@@ -383,7 +383,8 @@ def find_mesh_contact_faces(
     nodes_a: dict,
     elements_b: List[Tuple[int, List[int]]],
     nodes_b: dict,
-    margin: float = 1.0
+    margin: float = 1.0,
+    verbose: bool = True,
 ) -> Tuple[List[Tuple[int, int]], List[Tuple[int, int]]]:
     """
     Find mesh element faces at the contact region between two meshed parts.
@@ -467,27 +468,33 @@ def find_mesh_contact_faces(
                 return False
         return True
     
-    print("  Finding boundary faces...")
+    if verbose:
+        print("  Finding boundary faces...")
     boundary_a = get_boundary_faces_dict(elements_a)
     boundary_b = get_boundary_faces_dict(elements_b)
-    print(f"  Mesh A: {len(boundary_a)} boundary faces, Mesh B: {len(boundary_b)} boundary faces")
+    if verbose:
+        print(f"  Mesh A: {len(boundary_a)} boundary faces, Mesh B: {len(boundary_b)} boundary faces")
     
     bbox_a = get_mesh_bbox(nodes_a)
     bbox_b = get_mesh_bbox(nodes_b)
     
     if bbox_a is None or bbox_b is None:
-        print("  Could not compute bounding boxes!")
+        if verbose:
+            print("  Could not compute bounding boxes!")
         return [], []
     
-    print(f"  Mesh A bbox: X[{bbox_a[0]:.1f}, {bbox_a[1]:.1f}] Y[{bbox_a[2]:.1f}, {bbox_a[3]:.1f}] Z[{bbox_a[4]:.1f}, {bbox_a[5]:.1f}]")
-    print(f"  Mesh B bbox: X[{bbox_b[0]:.1f}, {bbox_b[1]:.1f}] Y[{bbox_b[2]:.1f}, {bbox_b[3]:.1f}] Z[{bbox_b[4]:.1f}, {bbox_b[5]:.1f}]")
+    if verbose:
+        print(f"  Mesh A bbox: X[{bbox_a[0]:.1f}, {bbox_a[1]:.1f}] Y[{bbox_a[2]:.1f}, {bbox_a[3]:.1f}] Z[{bbox_a[4]:.1f}, {bbox_a[5]:.1f}]")
+        print(f"  Mesh B bbox: X[{bbox_b[0]:.1f}, {bbox_b[1]:.1f}] Y[{bbox_b[2]:.1f}, {bbox_b[3]:.1f}] Z[{bbox_b[4]:.1f}, {bbox_b[5]:.1f}]")
     
     intersection = bbox_intersection(bbox_a, bbox_b, margin)
     if intersection is None:
-        print("  No bounding box intersection found!")
+        if verbose:
+            print("  No bounding box intersection found!")
         return [], []
     
-    print(f"  Intersection (±{margin}mm): X[{intersection[0]:.1f}, {intersection[1]:.1f}] Y[{intersection[2]:.1f}, {intersection[3]:.1f}] Z[{intersection[4]:.1f}, {intersection[5]:.1f}]")
+    if verbose:
+        print(f"  Intersection (±{margin}mm): X[{intersection[0]:.1f}, {intersection[1]:.1f}] Y[{intersection[2]:.1f}, {intersection[3]:.1f}] Z[{intersection[4]:.1f}, {intersection[5]:.1f}]")
     
     faces_a = []
     for (elem_id, face_num), face_nodes in boundary_a.items():
@@ -499,6 +506,172 @@ def find_mesh_contact_faces(
         if face_in_bbox(face_nodes, nodes_b, intersection):
             faces_b.append((elem_id, face_num))
     
-    print(f"  Found {len(faces_a)} faces from mesh A, {len(faces_b)} faces from mesh B in contact region")
+    if verbose:
+        print(f"  Found {len(faces_a)} faces from mesh A, {len(faces_b)} faces from mesh B in contact region")
     
     return faces_a, faces_b
+
+
+# =============================================================================
+# Two-Pass Meshing with Contact Refinement
+# =============================================================================
+
+@dataclass
+class ContactDefinition:
+    """Definition of a contact pair between two parts."""
+    name: str
+    part_a: str  # Part name (slave surface)
+    part_b: str  # Part name (master surface)
+
+
+@dataclass
+class MeshingConfig:
+    """Configuration for mesh generation.
+    
+    For timber frames (5m span, ~50mm contact surfaces):
+    - element_size: 150mm for bulk material (few elements, good stiffness)
+    - element_size_fine: 40mm at contacts (~1-2 elements per contact, easier convergence)
+    """
+    element_size: float = 150.0       # Base element size (mm) - coarse for bulk
+    element_size_fine: float = 40.0   # Fine mesh at contacts (mm) - ~1-2 per contact
+    refinement_margin: float = 20.0   # Expand refinement regions (mm)
+    contact_gap: float = 0.5          # Gap tolerance for contact detection (mm)
+
+
+@dataclass
+class MeshingResult:
+    """Result of meshing multiple parts with contact refinement."""
+    meshes: Dict[str, MeshResult]           # part_name -> MeshResult
+    combined: CombinedMesh                   # Combined mesh for all parts
+    contact_surfaces: Dict[str, List[Tuple[int, int]]]  # surface_name -> [(elem_id, face_num)]
+    
+    @property
+    def total_nodes(self) -> int:
+        return len(self.combined.nodes)
+    
+    @property
+    def total_elements(self) -> int:
+        return len(self.combined.elements)
+
+
+def mesh_parts_with_contact_refinement(
+    step_files: Dict[str, str],
+    contacts: List[ContactDefinition],
+    config: MeshingConfig,
+    verbose: bool = True,
+) -> MeshingResult:
+    """Mesh multiple parts with automatic contact region refinement.
+    
+    This is a two-pass meshing approach:
+    1. First pass: Coarse mesh to identify contact regions
+    2. Second pass: Fine mesh with refinement at contact regions
+    
+    Args:
+        step_files: Dict of part_name -> path to STEP file
+        contacts: List of ContactDefinition for contact pairs
+        config: MeshingConfig with mesh sizes and tolerances
+        verbose: Print progress information
+        
+    Returns:
+        MeshingResult with meshes, combined mesh, and contact surfaces
+    """
+    part_names = list(step_files.keys())
+    
+    # Pass 1: Coarse mesh to identify contact regions
+    if verbose:
+        print("Pass 1: Coarse mesh for contact detection...")
+    
+    coarse_meshes = {}
+    for part_name, step_file in step_files.items():
+        coarse_meshes[part_name] = mesh_part(
+            step_file, part_name.lower(), config.element_size
+        )
+    
+    # Find contact regions and build refinement boxes
+    refinement_boxes: Dict[str, List[RefinementBox]] = {name: [] for name in part_names}
+    
+    for contact in contacts:
+        mesh_a = coarse_meshes[contact.part_a]
+        mesh_b = coarse_meshes[contact.part_b]
+        
+        elems_a = [(i + 1, e) for i, e in enumerate(mesh_a.elements)]
+        elems_b = [(i + 1, e) for i, e in enumerate(mesh_b.elements)]
+        
+        faces_a, faces_b = find_mesh_contact_faces(
+            elems_a, mesh_a.nodes,
+            elems_b, mesh_b.nodes,
+            margin=config.element_size + config.contact_gap,
+            verbose=verbose,
+        )
+        
+        # Add refinement boxes for both parts
+        for part_name, faces, elems, nodes in [
+            (contact.part_a, faces_a, elems_a, mesh_a.nodes),
+            (contact.part_b, faces_b, elems_b, mesh_b.nodes),
+        ]:
+            bbox = get_contact_region_bbox(faces, elems, nodes)
+            if bbox:
+                expanded = expand_bbox(bbox, config.refinement_margin)
+                refinement_boxes[part_name].append(
+                    RefinementBox(expanded[0], expanded[1], config.element_size_fine)
+                )
+    
+    # Pass 2: Refined mesh
+    if verbose:
+        print("Pass 2: Refined mesh at contacts...")
+    
+    fine_meshes = {}
+    for part_name, step_file in step_files.items():
+        fine_meshes[part_name] = mesh_part(
+            step_file,
+            part_name.lower(),
+            config.element_size,
+            refinement_boxes[part_name] or None,
+        )
+        if verbose:
+            m = fine_meshes[part_name]
+            print(f"  {part_name}: {m.num_nodes} nodes, {m.num_elements} elements")
+    
+    # Combine meshes
+    combined = combine_meshes(fine_meshes)
+    
+    # Find contact surfaces on refined mesh
+    # Use tighter margin for fine mesh - we want actual contact faces, not nearby faces
+    contact_surfaces = {}
+    
+    for contact in contacts:
+        mesh_a = fine_meshes[contact.part_a]
+        mesh_b = fine_meshes[contact.part_b]
+        
+        elems_a = [(i + 1, e) for i, e in enumerate(mesh_a.elements)]
+        elems_b = [(i + 1, e) for i, e in enumerate(mesh_b.elements)]
+        
+        # Use smaller margin for fine mesh contact detection
+        # This should only capture faces that are actually in contact
+        fine_margin = config.element_size_fine * 0.5 + config.contact_gap
+        
+        faces_a, faces_b = find_mesh_contact_faces(
+            elems_a, mesh_a.nodes,
+            elems_b, mesh_b.nodes,
+            margin=fine_margin,
+            verbose=verbose,
+        )
+        
+        # Map to combined mesh element IDs
+        offset_a = combined.element_offsets[contact.part_a]
+        offset_b = combined.element_offsets[contact.part_b]
+        
+        surf_a = f"{contact.name}_{contact.part_a}_SURF"
+        surf_b = f"{contact.name}_{contact.part_b}_SURF"
+        
+        contact_surfaces[surf_a] = [(eid + offset_a, f) for eid, f in faces_a]
+        contact_surfaces[surf_b] = [(eid + offset_b, f) for eid, f in faces_b]
+        
+        if verbose:
+            print(f"  Contact '{contact.name}': {len(faces_a)} + {len(faces_b)} faces")
+    
+    return MeshingResult(
+        meshes=fine_meshes,
+        combined=combined,
+        contact_surfaces=contact_surfaces,
+    )

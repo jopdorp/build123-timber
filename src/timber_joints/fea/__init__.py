@@ -122,6 +122,11 @@ from .meshing import (
     C3D4_FACE_NODE_INDICES,
     build_mesh_faces_compound,
     find_mesh_contact_faces,
+    # Two-pass meshing with contact refinement
+    ContactDefinition,
+    MeshingConfig,
+    MeshingResult,
+    mesh_parts_with_contact_refinement,
 )
 
 # =============================================================================
@@ -137,28 +142,16 @@ from .visualization import (
 )
 
 # =============================================================================
-# Legacy API (for backward compatibility)
+# CalculiX Backend Utilities
 # =============================================================================
-from .calculix import (
-    ContactParameters as LegacyContactParameters,
-    StepParameters,
-    GrainOrientation as LegacyGrainOrientation,
-    TimberMaterial as LegacyTimberMaterial,
+from .backends.calculix import (
     CalculiXInput,
-    run_calculix,
-    FEAResults,
+    run_ccx,
     read_frd_displacements,
     read_frd_nodes,
-    analyze_results,
-    BEAM_HORIZONTAL_X as LEGACY_BEAM_HORIZONTAL_X,
-    POST_VERTICAL_Z as LEGACY_POST_VERTICAL_Z,
 )
 
 from .assembly import (
-    FEAPart as LegacyFEAPart,
-    ContactPair as LegacyContactPair,
-    FixedBC as LegacyFixedBC,
-    LoadBC as LegacyLoadBC,
     AssemblyConfig,
     AssemblyResult,
     analyze_assembly,
@@ -173,6 +166,49 @@ from .frame import (
 )
 
 __all__ = [
+    # Materials
+    "TimberMaterial",
+    "MaterialModel",
+    "GrainDirection",
+    "GrainOrientation",
+    "ElasticConstants",
+    "StrengthProperties",
+    "SoftwoodC24",
+    "HardwoodD30",
+    "PoplarViscoelastic",
+    "CustomTimberMaterial",
+    "BEAM_HORIZONTAL_X",
+    "POST_VERTICAL_Z",
+    "BRACE_DIAGONAL",
+    "MFrontCompiler",
+    "MaterialRegistry",
+    "get_default_material",
+    "create_material",
+    # Solver
+    "SolverType",
+    "AnalysisType",
+    "SolverBackend",
+    "BaseSolverBackend",
+    "BackendRegistry",
+    "FEAPart",
+    "ContactPair",
+    "ContactParameters",
+    "FixedBC",
+    "LoadBC",
+    "DisplacementBC",
+    "AnalysisProblem",
+    "MeshConfig",
+    "StepConfig",
+    "OutputConfig",
+    "AnalysisConfig",
+    "NodeResult",
+    "ElementResult",
+    "AnalysisResult",
+    "analyze",
+    "get_backend",
+    # Backends
+    "CalculiXBackend",
+    "CodeAsterBackend",
     # Meshing
     "RefinementBox",
     "MeshResult", 
@@ -186,19 +222,15 @@ __all__ = [
     "C3D4_FACE_NODE_INDICES",
     "build_mesh_faces_compound",
     "find_mesh_contact_faces",
-    # CalculiX
-    "ContactParameters",
-    "StepParameters",
-    "GrainOrientation",
-    "TimberMaterial",
+    "ContactDefinition",
+    "MeshingConfig",
+    "MeshingResult",
+    "mesh_parts_with_contact_refinement",
+    # CalculiX utilities
     "CalculiXInput",
-    "run_calculix",
-    "FEAResults",
+    "run_ccx",
     "read_frd_displacements",
     "read_frd_nodes",
-    "analyze_results",
-    "BEAM_HORIZONTAL_X",
-    "POST_VERTICAL_Z",
     # Visualization
     "read_mesh_elements",
     "get_outer_faces",
@@ -206,11 +238,7 @@ __all__ = [
     "apply_displacements",
     "build_deformed_mesh",
     "show_fea_results",
-    # Generic Assembly API
-    "FEAPart",
-    "ContactPair",
-    "FixedBC",
-    "LoadBC",
+    # Assembly API
     "AssemblyConfig",
     "AssemblyResult",
     "analyze_assembly",

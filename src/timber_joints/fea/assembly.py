@@ -17,27 +17,29 @@ from typing import Dict, List, Optional, Tuple, Callable
 from build123d import Part, export_step, BoundBox
 
 from .meshing import (
-    RefinementBox,
     MeshResult,
+    MeshingResult,
     CombinedMesh,
-    mesh_part,
-    get_contact_region_bbox,
-    expand_bbox,
-    combine_meshes,
+    ContactDefinition,
+    MeshingConfig,
+    mesh_parts_with_contact_refinement,
     write_mesh_inp,
-    find_mesh_contact_faces,
 )
-from .calculix import (
-    ContactParameters,
-    StepParameters,
+from .materials import (
     GrainOrientation,
     TimberMaterial,
-    CalculiXInput,
-    run_calculix,
-    analyze_results,
-    FEAResults,
     BEAM_HORIZONTAL_X,
     POST_VERTICAL_Z,
+    get_default_material,
+)
+from .backends.calculix import (
+    CalculiXInput,
+    run_ccx,
+    read_frd_displacements,
+)
+from .solver import (
+    ContactParameters,
+    StepConfig,
 )
 
 
@@ -100,27 +102,45 @@ class LoadBC:
 
 @dataclass
 class AssemblyConfig:
-    """Configuration for assembly FEA analysis."""
-    mesh_size: float = 50.0
-    mesh_size_fine: float = 20.0
-    refinement_margin: float = 10.0
+    """Configuration for assembly FEA analysis.
+    
+    Default mesh sizes tuned for timber frames (5m span, ~50mm contacts).
+    """
+    mesh_size: float = 150.0  # Coarse base mesh for bulk material
+    mesh_size_fine: float = 40.0  # Fine mesh at contact surfaces (~1-2 per contact)
+    refinement_margin: float = 20.0  # Margin around contact regions
     contact_gap: float = 0.5
     
     material: TimberMaterial = None
     contact: ContactParameters = None
-    step: StepParameters = None
+    step: StepConfig = None
     
     output_dir: Path = None
     
     def __post_init__(self):
         if self.material is None:
-            self.material = TimberMaterial()
+            self.material = get_default_material()
         if self.contact is None:
             self.contact = ContactParameters()
         if self.step is None:
-            self.step = StepParameters()
+            self.step = StepConfig()
         if self.output_dir is None:
             self.output_dir = Path("./fea_output")
+
+
+@dataclass
+class FEAResults:
+    """Results from CalculiX FEA analysis."""
+    max_displacement: float
+    max_uz: float  # Z displacement (typically vertical)
+    displacements: Dict[int, Tuple[float, float, float]]  # node_id -> (ux, uy, uz)
+    success: bool
+    frd_file: Optional[Path] = None
+    
+    @property
+    def max_deflection(self) -> float:
+        """Alias for max_displacement."""
+        return self.max_displacement
 
 
 @dataclass
@@ -155,138 +175,58 @@ def analyze_assembly(
     contacts: List[ContactPair],
     fixed_bcs: List[FixedBC],
     load_bcs: List[LoadBC],
+    meshing_result: MeshingResult,
     config: Optional[AssemblyConfig] = None,
     verbose: bool = True,
 ) -> AssemblyResult:
     """Run FEA analysis on a generic assembly.
     
     This is the main entry point for FEA analysis. It:
-    1. Exports parts to STEP and meshes them
-    2. Identifies contact regions and refines mesh
-    3. Finds contact surfaces between parts
-    4. Applies boundary conditions
-    5. Runs CalculiX solver
-    6. Returns results
+    1. Uses pre-computed mesh from TimberFrame.mesh()
+    2. Applies boundary conditions
+    3. Runs CalculiX solver
+    4. Returns results
     
     Args:
         parts: List of FEAPart definitions
         contacts: List of ContactPair definitions
         fixed_bcs: List of FixedBC definitions  
         load_bcs: List of LoadBC definitions
+        meshing_result: Pre-computed MeshingResult from TimberFrame.mesh()
         config: Analysis configuration
         verbose: Print progress
         
     Returns:
         AssemblyResult with FEA results
     """
+    import numpy as np
+    
     if config is None:
         config = AssemblyConfig()
     
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Build part lookup
-    part_dict = {p.name: p for p in parts}
-    
-    # Export parts to STEP
+    # Export parts to STEP (needed for mesh.inp even if we have cached mesh)
     step_files = {}
     for part in parts:
         step_file = str(output_dir / f"{part.name.lower()}.step")
         export_step(part.shape, step_file)
         step_files[part.name] = step_file
     
-    # Pass 1: Coarse mesh to identify contact regions
-    if verbose:
-        print("Pass 1: Coarse mesh to identify contact regions...")
+    # Use pre-computed mesh from TimberFrame.mesh()
+    combined = meshing_result.combined
+    contact_surfaces = meshing_result.contact_surfaces
+    fine_meshes = meshing_result.meshes
     
-    coarse_meshes = {}
-    for part in parts:
-        coarse_meshes[part.name] = mesh_part(
-            step_files[part.name], part.name.lower(), config.mesh_size
-        )
-    
-    # Find contact regions and build refinement boxes
-    refinement_boxes: Dict[str, List[RefinementBox]] = {p.name: [] for p in parts}
-    
-    for contact in contacts:
-        mesh_a = coarse_meshes[contact.part_a]
-        mesh_b = coarse_meshes[contact.part_b]
-        
-        elems_a = [(i + 1, e) for i, e in enumerate(mesh_a.elements)]
-        elems_b = [(i + 1, e) for i, e in enumerate(mesh_b.elements)]
-        
-        faces_a, faces_b = find_mesh_contact_faces(
-            elems_a, mesh_a.nodes,
-            elems_b, mesh_b.nodes,
-            margin=config.mesh_size + config.contact_gap
-        )
-        
-        # Add refinement for part A
-        bbox_a = get_contact_region_bbox(faces_a, elems_a, mesh_a.nodes)
-        if bbox_a:
-            expanded = expand_bbox(bbox_a, config.refinement_margin)
-            refinement_boxes[contact.part_a].append(
-                RefinementBox(expanded[0], expanded[1], config.mesh_size_fine)
-            )
-        
-        # Add refinement for part B
-        bbox_b = get_contact_region_bbox(faces_b, elems_b, mesh_b.nodes)
-        if bbox_b:
-            expanded = expand_bbox(bbox_b, config.refinement_margin)
-            refinement_boxes[contact.part_b].append(
-                RefinementBox(expanded[0], expanded[1], config.mesh_size_fine)
-            )
-    
-    # Pass 2: Refined mesh
-    if verbose:
-        print("Pass 2: Refined mesh at contact regions...")
-    
-    fine_meshes = {}
-    for part in parts:
-        fine_meshes[part.name] = mesh_part(
-            step_files[part.name],
-            part.name.lower(),
-            config.mesh_size,
-            refinement_boxes[part.name] or None,
-        )
-        if verbose:
-            m = fine_meshes[part.name]
-            print(f"  {part.name}: {m.num_nodes} nodes, {m.num_elements} elements")
-    
-    # Combine meshes
-    combined = combine_meshes(fine_meshes)
-    
-    # Find contact surfaces on refined mesh
-    contact_surfaces = {}
+    # Count contact faces
     contact_face_counts = {}
-    
     for contact in contacts:
-        mesh_a = fine_meshes[contact.part_a]
-        mesh_b = fine_meshes[contact.part_b]
-        
-        elems_a = [(i + 1, e) for i, e in enumerate(mesh_a.elements)]
-        elems_b = [(i + 1, e) for i, e in enumerate(mesh_b.elements)]
-        
-        faces_a, faces_b = find_mesh_contact_faces(
-            elems_a, mesh_a.nodes,
-            elems_b, mesh_b.nodes,
-            margin=config.mesh_size_fine + config.contact_gap
-        )
-        
-        # Map to combined mesh element IDs
-        offset_a = combined.element_offsets[contact.part_a]
-        offset_b = combined.element_offsets[contact.part_b]
-        
-        surf_a_name = f"{contact.name}_{contact.part_a}_SURF"
-        surf_b_name = f"{contact.name}_{contact.part_b}_SURF"
-        
-        contact_surfaces[surf_a_name] = [(eid + offset_a, f) for eid, f in faces_a]
-        contact_surfaces[surf_b_name] = [(eid + offset_b, f) for eid, f in faces_b]
-        
-        contact_face_counts[contact.name] = len(faces_a) + len(faces_b)
-        
-        if verbose:
-            print(f"  Contact '{contact.name}': {len(faces_a)} + {len(faces_b)} faces")
+        surf_a = f"{contact.name}_{contact.part_a}_SURF"
+        surf_b = f"{contact.name}_{contact.part_b}_SURF"
+        count_a = len(contact_surfaces.get(surf_a, []))
+        count_b = len(contact_surfaces.get(surf_b, []))
+        contact_face_counts[contact.name] = count_a + count_b
     
     # Write mesh file
     mesh_file = output_dir / "mesh.inp"
@@ -334,14 +274,21 @@ def analyze_assembly(
     
     # Contact interaction
     ccx.add_comment("Contact interaction")
-    ccx.add_surface_interaction("WOOD_CONTACT", config.contact, config.contact_gap)
+    ccx.add_surface_interaction(
+        "WOOD_CONTACT",
+        config.contact.friction_coeff,
+        config.contact.normal_penalty,
+        config.contact.stick_slope,
+        config.contact.stabilize,
+        config.contact_gap,
+    )
     ccx.add_blank()
     
     # Contact pairs
     for contact in contacts:
         surf_a = f"{contact.name}_{contact.part_a}_SURF"
         surf_b = f"{contact.name}_{contact.part_b}_SURF"
-        if contact_surfaces[surf_a] and contact_surfaces[surf_b]:
+        if contact_surfaces.get(surf_a) and contact_surfaces.get(surf_b):
             ccx.add_comment(f"Contact: {contact.name}")
             ccx.add_contact_pair("WOOD_CONTACT", surf_a, surf_b, config.contact.adjust)
             ccx.add_blank()
@@ -358,7 +305,15 @@ def analyze_assembly(
     
     # Analysis step
     ccx.add_comment("Static analysis step")
-    ccx.start_step(config.step)
+    step = config.step
+    ccx.start_step(
+        step.initial_increment,
+        step.total_time,
+        step.min_increment,
+        step.max_increment,
+        step.max_increments,
+        step.nonlinear_geometry,
+    )
     ccx.add_contact_controls()
     ccx.add_blank()
     
@@ -381,21 +336,41 @@ def analyze_assembly(
     if verbose:
         print("\nRunning CalculiX solver...")
     
-    success, stdout, stderr = run_calculix(input_file)
+    success, stdout, stderr = run_ccx(input_file)
     
     if verbose:
         print(stdout)
         if stderr:
             print(f"STDERR: {stderr}")
     
-    # Analyze results
+    # Parse results
     frd_file = output_dir / "analysis.frd"
-    fea_results = analyze_results(frd_file) if success else FEAResults(
-        max_displacement=0.0,
-        max_uz=0.0,
-        displacements={},
-        success=False,
-    )
+    if success and frd_file.exists():
+        displacements = read_frd_displacements(frd_file)
+        if displacements:
+            max_total = 0.0
+            max_uz = 0.0
+            for ux, uy, uz in displacements.values():
+                total = np.sqrt(ux**2 + uy**2 + uz**2)
+                if total > max_total:
+                    max_total = total
+                if abs(uz) > abs(max_uz):
+                    max_uz = uz
+            fea_results = FEAResults(
+                max_displacement=max_total,
+                max_uz=max_uz,
+                displacements=displacements,
+                success=True,
+                frd_file=frd_file,
+            )
+        else:
+            fea_results = FEAResults(
+                max_displacement=0.0, max_uz=0.0, displacements={}, success=False
+            )
+    else:
+        fea_results = FEAResults(
+            max_displacement=0.0, max_uz=0.0, displacements={}, success=False
+        )
     
     if verbose and fea_results.success:
         print(f"\nResults:")

@@ -79,12 +79,16 @@ class ContactPair:
 
 @dataclass
 class ContactParameters:
-    """Parameters for frictional contact."""
+    """Parameters for frictional contact.
+    
+    For timber joints with small gaps, use lower penalty values
+    to help convergence. CalculiX will adjust automatically.
+    """
     friction_coeff: float = 0.35
-    normal_penalty: float = 300.0  # MPa/mm
-    stick_slope: float = 300.0
-    stabilize: float = 0.01
-    adjust: float = 1.5  # mm
+    normal_penalty: float = 100.0    # MPa/mm - lower for better convergence
+    stick_slope: float = 100.0       # Match normal_penalty
+    stabilize: float = 0.001         # Small stabilization
+    adjust: float = 0.5              # mm - smaller adjustment distance
 
 
 # Node filter function signature
@@ -142,12 +146,16 @@ class MeshConfig:
 
 @dataclass
 class StepConfig:
-    """Analysis step configuration."""
-    initial_increment: float = 0.2
+    """Analysis step configuration.
+    
+    For contact problems, use smaller initial_increment (0.01-0.05) to help
+    convergence. The solver will automatically adjust step size.
+    """
+    initial_increment: float = 0.05  # Start with 5% of load for contact problems
     total_time: float = 1.0
-    min_increment: float = 1e-5
-    max_increment: float = 0.4
-    max_increments: int = 100
+    min_increment: float = 1e-6      # Allow very small steps for difficult convergence
+    max_increment: float = 0.2       # Don't jump too far
+    max_increments: int = 200        # Allow more iterations for contact
     nonlinear_geometry: bool = True
 
 

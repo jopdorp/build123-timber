@@ -37,15 +37,13 @@ from ..solver import (
 )
 from ..materials import TimberMaterial, GrainOrientation
 from ..meshing import (
-    RefinementBox,
     MeshResult,
     CombinedMesh,
-    mesh_part,
-    get_contact_region_bbox,
-    expand_bbox,
-    combine_meshes,
+    ContactDefinition,
+    MeshingConfig,
+    MeshingResult,
+    mesh_parts_with_contact_refinement,
     write_mesh_inp,
-    find_mesh_contact_faces,
 )
 
 
@@ -338,9 +336,6 @@ class CalculiXBackend(BaseSolverBackend):
         """Run CalculiX analysis."""
         output_dir = self._ensure_output_dir(config)
         
-        # Build part lookup
-        part_dict = {p.name: p for p in problem.parts}
-        
         # Export parts to STEP
         step_files = {}
         for part in problem.parts:
@@ -348,26 +343,38 @@ class CalculiXBackend(BaseSolverBackend):
             export_step(part.shape, str(step_file))
             step_files[part.name] = str(step_file)
         
-        # Mesh parts
+        # Mesh parts with contact refinement
         if verbose:
             print("Meshing parts...")
         
-        fine_meshes, combined, contact_surfaces = self._mesh_and_find_contacts(
-            problem, config, step_files, verbose
+        contacts = [
+            ContactDefinition(name=c.name, part_a=c.part_a, part_b=c.part_b)
+            for c in problem.contacts
+        ]
+        mesh_config = MeshingConfig(
+            element_size=config.mesh.element_size,
+            element_size_fine=config.mesh.element_size_fine,
+            refinement_margin=config.mesh.refinement_margin,
+            contact_gap=config.contact_gap,
+        )
+        
+        meshing_result = mesh_parts_with_contact_refinement(
+            step_files, contacts, mesh_config, verbose
         )
         
         # Write mesh file
         mesh_file = output_dir / "mesh.inp"
-        write_mesh_inp(combined, mesh_file, contact_surfaces)
+        write_mesh_inp(meshing_result.combined, mesh_file, meshing_result.contact_surfaces)
         
         # Apply boundary conditions
         bc_node_lists = self._apply_boundary_conditions(
-            problem, config, fine_meshes, combined, verbose
+            problem, config, meshing_result.meshes, meshing_result.combined, verbose
         )
         
         # Generate CalculiX input
         input_file = self._generate_input(
-            problem, config, combined, contact_surfaces, bc_node_lists, output_dir
+            problem, config, meshing_result.combined, meshing_result.contact_surfaces, 
+            bc_node_lists, output_dir
         )
         
         # Run solver
@@ -383,105 +390,6 @@ class CalculiXBackend(BaseSolverBackend):
         
         # Parse results
         return self._parse_results(success, output_dir, stdout, stderr, mesh_file, input_file)
-    
-    def _mesh_and_find_contacts(
-        self,
-        problem: AnalysisProblem,
-        config: AnalysisConfig,
-        step_files: Dict[str, str],
-        verbose: bool,
-    ) -> tuple[Dict[str, MeshResult], CombinedMesh, Dict[str, List]]:
-        """Mesh parts and find contact surfaces."""
-        mesh_cfg = config.mesh
-        
-        # Pass 1: Coarse mesh to identify contact regions
-        if verbose:
-            print("Pass 1: Coarse mesh for contact detection...")
-        
-        coarse_meshes = {}
-        for part in problem.parts:
-            coarse_meshes[part.name] = mesh_part(
-                step_files[part.name], part.name.lower(), mesh_cfg.element_size
-            )
-        
-        # Find contact regions
-        refinement_boxes: Dict[str, List[RefinementBox]] = {
-            p.name: [] for p in problem.parts
-        }
-        
-        for contact in problem.contacts:
-            mesh_a = coarse_meshes[contact.part_a]
-            mesh_b = coarse_meshes[contact.part_b]
-            
-            elems_a = [(i + 1, e) for i, e in enumerate(mesh_a.elements)]
-            elems_b = [(i + 1, e) for i, e in enumerate(mesh_b.elements)]
-            
-            faces_a, faces_b = find_mesh_contact_faces(
-                elems_a, mesh_a.nodes,
-                elems_b, mesh_b.nodes,
-                margin=mesh_cfg.element_size + config.contact_gap
-            )
-            
-            # Add refinement boxes
-            for part_name, faces, elems, nodes in [
-                (contact.part_a, faces_a, elems_a, mesh_a.nodes),
-                (contact.part_b, faces_b, elems_b, mesh_b.nodes),
-            ]:
-                bbox = get_contact_region_bbox(faces, elems, nodes)
-                if bbox:
-                    expanded = expand_bbox(bbox, mesh_cfg.refinement_margin)
-                    refinement_boxes[part_name].append(
-                        RefinementBox(expanded[0], expanded[1], mesh_cfg.element_size_fine)
-                    )
-        
-        # Pass 2: Refined mesh
-        if verbose:
-            print("Pass 2: Refined mesh at contacts...")
-        
-        fine_meshes = {}
-        for part in problem.parts:
-            fine_meshes[part.name] = mesh_part(
-                step_files[part.name],
-                part.name.lower(),
-                mesh_cfg.element_size,
-                refinement_boxes[part.name] or None,
-            )
-            if verbose:
-                m = fine_meshes[part.name]
-                print(f"  {part.name}: {m.num_nodes} nodes, {m.num_elements} elements")
-        
-        # Combine meshes
-        combined = combine_meshes(fine_meshes)
-        
-        # Find contact surfaces on refined mesh
-        contact_surfaces = {}
-        
-        for contact in problem.contacts:
-            mesh_a = fine_meshes[contact.part_a]
-            mesh_b = fine_meshes[contact.part_b]
-            
-            elems_a = [(i + 1, e) for i, e in enumerate(mesh_a.elements)]
-            elems_b = [(i + 1, e) for i, e in enumerate(mesh_b.elements)]
-            
-            faces_a, faces_b = find_mesh_contact_faces(
-                elems_a, mesh_a.nodes,
-                elems_b, mesh_b.nodes,
-                margin=mesh_cfg.element_size_fine + config.contact_gap
-            )
-            
-            offset_a = combined.element_offsets[contact.part_a]
-            offset_b = combined.element_offsets[contact.part_b]
-            
-            surf_a = f"{contact.name}_{contact.part_a}_SURF"
-            surf_b = f"{contact.name}_{contact.part_b}_SURF"
-            
-            contact_surfaces[surf_a] = [(eid + offset_a, f) for eid, f in faces_a]
-            contact_surfaces[surf_b] = [(eid + offset_b, f) for eid, f in faces_b]
-            
-            if verbose:
-                print(f"  Contact '{contact.name}': {len(faces_a)} + {len(faces_b)} faces")
-        
-        return fine_meshes, combined, contact_surfaces
     
     def _apply_boundary_conditions(
         self,

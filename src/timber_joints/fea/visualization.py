@@ -11,7 +11,7 @@ from OCP.TopoDS import TopoDS_Compound
 
 from build123d import Compound
 
-from .calculix import read_frd_nodes, read_frd_displacements
+from .backends.calculix import read_frd_nodes, read_frd_displacements
 
 
 # C3D4 tetrahedron face definitions (0-indexed into node list)

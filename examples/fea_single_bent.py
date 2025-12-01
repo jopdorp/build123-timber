@@ -9,7 +9,8 @@ from ocp_vscode import reset_show, show_object
 from timber_joints.alignment import build_complete_bent, BraceParams
 from timber_joints.fea import (
     TimberFrame, show_fea_results, LoadBC,
-    mesh_part, get_boundary_faces, build_mesh_faces_compound,
+    get_boundary_faces, build_mesh_faces_compound,
+    mesh_parts_with_contact_refinement, ContactDefinition, MeshingConfig,
 )
 
 reset_show()
@@ -37,7 +38,7 @@ for i, brace in enumerate(braces):
     frame.add_member(f"brace_{i}", brace)
 
 # %%
-# Visualize CAD geometry, mesh geometry, and mesh contact surfaces side by side
+# Visualize CAD geometry, REFINED mesh geometry, and contact surfaces
 
 Y_CAD = 0         # CAD geometry at origin
 Y_MESH = -500     # Mesh geometry offset
@@ -51,43 +52,72 @@ show_object(beam, name="CAD: Beam", options={"color": "burlywood", "alpha": 0.5}
 for i, brace in enumerate(braces):
     show_object(brace, name=f"CAD: Brace {i}", options={"color": "orange", "alpha": 0.5})
 
-# 2. Mesh geometry (triangulated surfaces) - using meshing utilities directly
-print("Generating mesh geometry...")
+# 2. Generate REFINED mesh with contact detection using the utility
+print("Generating refined mesh with contact detection...")
 with tempfile.TemporaryDirectory() as tmpdir:
-    mesh_compounds = []
+    # Export all parts to STEP
+    step_files = {}
     for member in frame.members:
         step_path = Path(tmpdir) / f"{member.name}.step"
         export_step(member.shape, str(step_path))
-        mesh = mesh_part(str(step_path), member.name, mesh_size=50.0)
-        
+        step_files[member.name] = str(step_path)
+    
+    # Define contacts (auto-detect from frame)
+    contact_defs = []
+    for i, (part_a, part_b) in enumerate(frame._find_contacts()):
+        contact_defs.append(ContactDefinition(f"contact_{i}", part_a, part_b))
+    
+    print(f"Contact pairs to mesh: {len(contact_defs)}")
+    for cd in contact_defs:
+        print(f"  {cd.part_a} <-> {cd.part_b}")
+    
+    # Mesh with contact refinement (two-pass)
+    mesh_config = MeshingConfig(
+        element_size=150.0,
+        element_size_fine=40.0,
+        refinement_margin=20.0,
+        contact_gap=0.5,
+    )
+    
+    meshing_result = mesh_parts_with_contact_refinement(
+        step_files, contact_defs, mesh_config, verbose=True
+    )
+    
+    # 3. Visualize refined mesh boundaries
+    print(f"\nRefined mesh: {meshing_result.total_nodes} nodes, {meshing_result.total_elements} elements")
+    
+    for part_name, mesh in meshing_result.meshes.items():
         elems = [(i + 1, e) for i, e in enumerate(mesh.elements)]
         boundary_faces = get_boundary_faces(elems)
         mesh_compound = build_mesh_faces_compound(boundary_faces, elems, mesh.nodes)
-        mesh_compounds.append((member.name, mesh_compound))
-
-print(f"Generated {len(mesh_compounds)} mesh parts")
-
-for name, mesh_compound in mesh_compounds:
-    mesh_offset = mesh_compound.move(Location((0, Y_MESH, 0)))
-    show_object(mesh_offset, name=f"Mesh: {name}", options={"color": "lightgray", "alpha": 0.7})
-
-# 3. Mesh contact surfaces
-print("Extracting contact surfaces...")
-contact_surfaces = frame.get_contact_surfaces(mesh_size=50.0)
-print(f"Found {len(contact_surfaces)} contact pairs")
-
-for name_a, name_b, surface_a, surface_b in contact_surfaces:
-    # Offset surfaces in Y for visibility
-    surface_a_offset = surface_a.move(Location((0, Y_CONTACT, 0)))
-    surface_b_offset = surface_b.move(Location((0, Y_CONTACT, 0)))
+        mesh_offset = mesh_compound.move(Location((0, Y_MESH, 0)))
+        show_object(mesh_offset, name=f"Refined Mesh: {part_name}", options={"color": "lightgray", "alpha": 0.7})
+        print(f"  {part_name}: {mesh.num_nodes} nodes, {mesh.num_elements} elements")
     
-    show_object(surface_a_offset, name=f"Contact: {name_a}->{name_b} (A)", options={"color": "red"})
-    show_object(surface_b_offset, name=f"Contact: {name_a}->{name_b} (B)", options={"color": "blue"})
-    
-    # Print surface areas
-    area_a = sum(f.area for f in surface_a.faces())
-    area_b = sum(f.area for f in surface_b.faces())
-    print(f"  {name_a} <-> {name_b}: A={area_a:.0f}mm², B={area_b:.0f}mm²")
+    # 4. Visualize contact surfaces from the refined mesh
+    print(f"\nContact surfaces:")
+    for surf_name, faces in meshing_result.contact_surfaces.items():
+        if not faces:
+            continue
+        
+        # Build compound from contact faces using combined mesh
+        mesh_compound = build_mesh_faces_compound(
+            faces, 
+            meshing_result.combined.elements, 
+            meshing_result.combined.nodes
+        )
+        
+        # Color by surface type (A vs B)
+        color = "red" if "_SURF" in surf_name and surf_name.count("_") >= 2 else "blue"
+        # Alternate colors for clarity
+        if "part_a" in surf_name.lower() or surf_name.endswith("_SURF"):
+            parts = surf_name.rsplit("_", 2)
+            if len(parts) >= 2:
+                color = "red" if parts[-2] != parts[-1].replace("_SURF", "") else "blue"
+        
+        surface_offset = mesh_compound.move(Location((0, Y_CONTACT, 0)))
+        show_object(surface_offset, name=f"Contact: {surf_name}", options={"color": color})
+        print(f"  {surf_name}: {len(faces)} faces")
 
 # %%
 # Run FEA analysis
