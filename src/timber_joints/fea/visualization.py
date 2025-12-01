@@ -15,7 +15,14 @@ from .backends.calculix import read_frd_nodes, read_frd_displacements, read_frd_
 
 
 # C3D4 tetrahedron face definitions (0-indexed into node list)
-C3D4_FACE_INDICES = [(0, 1, 2), (0, 1, 3), (1, 2, 3), (0, 2, 3)]
+# Each face is defined with outward-pointing normal using right-hand rule
+# Face i is opposite to node i
+C3D4_FACE_INDICES = [
+    (1, 3, 2),  # Face 0: opposite to node 0
+    (0, 2, 3),  # Face 1: opposite to node 1
+    (0, 3, 1),  # Face 2: opposite to node 2
+    (0, 1, 2),  # Face 3: opposite to node 3
+]
 
 
 def value_to_limit_color(value: float, limit: float) -> str:
@@ -163,25 +170,74 @@ def read_mesh_elements(mesh_file: str) -> List[List[int]]:
     return elements
 
 
-def get_outer_faces(elements: List[List[int]]) -> List[Tuple[int, int, int]]:
-    """Extract boundary triangular faces from tetrahedral mesh.
+def get_outer_faces(
+    elements: List[List[int]], 
+    nodes: Optional[Dict[int, Tuple[float, float, float]]] = None
+) -> List[Tuple[int, int, int]]:
+    """Extract boundary triangular faces from tetrahedral mesh with consistent outward normals.
     
     Boundary faces appear exactly once (not shared between elements).
+    Uses proper winding order to ensure outward-pointing normals.
     
     Args:
         elements: List of [n1, n2, n3, n4] element connectivity
+        nodes: Optional dict mapping node_id to (x, y, z) coordinates.
+               If provided, normals are verified to point outward.
         
     Returns:
-        List of (n1, n2, n3) node tuples for boundary faces
+        List of (n1, n2, n3) node tuples for boundary faces with consistent winding
     """
-    face_count = {}
+    # Track faces: key is sorted tuple for comparison, value is (actual_winding, element_idx, opposite_node_idx)
+    face_data = {}
     
-    for elem in elements:
-        for i, j, k in C3D4_FACE_INDICES:
-            face_key = tuple(sorted([elem[i], elem[j], elem[k]]))
-            face_count[face_key] = face_count.get(face_key, 0) + 1
+    for elem_idx, elem in enumerate(elements):
+        for face_idx, (i, j, k) in enumerate(C3D4_FACE_INDICES):
+            # Get the actual node IDs with proper winding
+            n1, n2, n3 = elem[i], elem[j], elem[k]
+            
+            # Create a sorted key for identifying shared faces
+            face_key = tuple(sorted([n1, n2, n3]))
+            
+            if face_key in face_data:
+                # Face is shared - mark for removal
+                face_data[face_key] = None
+            else:
+                # First time seeing this face - store with proper winding
+                # Also store the opposite node (for outward normal verification)
+                opposite_node = elem[face_idx]  # The node opposite to this face
+                face_data[face_key] = (n1, n2, n3, opposite_node)
     
-    return [f for f, count in face_count.items() if count == 1]
+    # Extract boundary faces (those that appear exactly once)
+    boundary_faces = []
+    for face_key, data in face_data.items():
+        if data is not None:
+            n1, n2, n3, opposite_node = data
+            
+            # If we have node coordinates, verify the normal points outward
+            if nodes is not None and n1 in nodes and n2 in nodes and n3 in nodes and opposite_node in nodes:
+                # Compute face centroid
+                p1 = np.array(nodes[n1])
+                p2 = np.array(nodes[n2])
+                p3 = np.array(nodes[n3])
+                face_center = (p1 + p2 + p3) / 3
+                
+                # Compute face normal using right-hand rule
+                v1 = p2 - p1
+                v2 = p3 - p1
+                normal = np.cross(v1, v2)
+                
+                # Vector from opposite node to face center should align with normal
+                # (the normal should point away from the element interior)
+                opposite_pt = np.array(nodes[opposite_node])
+                outward_dir = face_center - opposite_pt
+                
+                # If normal points inward (dot product negative), flip winding
+                if np.dot(normal, outward_dir) < 0:
+                    n1, n2, n3 = n1, n3, n2  # Flip winding
+            
+            boundary_faces.append((n1, n2, n3))
+    
+    return boundary_faces
 
 
 def build_triangle_compound(
@@ -277,8 +333,8 @@ def build_deformed_mesh(
     # Build deformed coordinates
     deformed_nodes = apply_displacements(nodes, displacements, scale)
     
-    # Get boundary faces and build compound
-    outer_faces = get_outer_faces(elements)
+    # Get boundary faces and build compound (pass nodes for proper normal orientation)
+    outer_faces = get_outer_faces(elements, nodes)
     deformed_compound = build_triangle_compound(outer_faces, deformed_nodes)
     
     info = {
@@ -543,8 +599,8 @@ def show_fea_results_colormap(
     # Build deformed coordinates
     deformed_nodes = apply_displacements(nodes, displacements, scale)
     
-    # Get boundary faces
-    outer_faces = get_outer_faces(elements)
+    # Get boundary faces (pass nodes for proper normal orientation)
+    outer_faces = get_outer_faces(elements, nodes)
     
     # Check against limits
     disp_ratio = max_disp / displacement_limit if displacement_limit > 0 else 0
