@@ -76,7 +76,7 @@ def test_single_brace():
         post=vertical_post,
         beam=positioned_beam,
         brace_section=100,  # 100x100mm brace
-        distance_from_post=400,  # 400mm from post (creates ~45° brace)
+        brace_length=707,   # ~500mm horizontal at 45°
         at_beam_start=True,
     )
     brace = brace_result.shape
@@ -124,7 +124,7 @@ def test_bent_with_braces():
         post=left_post,
         beam=beam,
         brace_section=100,
-        distance_from_post=500,
+        brace_length=707,
         at_beam_start=True,
     )
     
@@ -132,7 +132,7 @@ def test_bent_with_braces():
         post=right_post,
         beam=beam,
         brace_section=100,
-        distance_from_post=500,
+        brace_length=707,
         at_beam_start=False,
     )
     
@@ -204,7 +204,7 @@ def test_girt_braces():
         post=vertical_post,
         girt=positioned_girt,
         brace_section=100,
-        distance_from_post=400,
+        brace_length=707,
         at_girt_start=False,  # Toward +Y (away from post on +Y side)
     )
     brace = brace_result.shape

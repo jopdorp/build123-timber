@@ -4,20 +4,15 @@ The brace tenon is a shouldered tenon with release cuts that allow the tenon
 to fit cleanly into the receiving member (post or beam).
 
 CRITICAL GEOMETRY:
-
 - The brace is horizontal (axis-aligned along X) when these cuts are made
 - The shoulder creates an angled bearing surface
 - Release cuts must be VERTICAL after rotation (aligned with the receiving member)
 - This means: on the horizontal brace, release cuts are at the BRACE ANGLE
 
 Release cuts:
-
-1. Side release: A vertical plane (after rotation) that starts at the shoulder edge
-   and runs along the side of the tenon. This prevents the tenon sides from
-   binding against the mortise walls.
-
-2. Tip release: A vertical plane (after rotation) at the tenon tip that creates
-   clearance for the tenon to seat properly.
+1. Side release: Vertical plane (after rotation) starting at shoulder edge
+   along the tenon side, preventing binding against mortise walls.
+2. Tip release: Vertical plane (after rotation) at tenon tip for seating clearance.
 
 These cuts are made as angled wedges on the horizontal brace, so that after
 rotation they become vertical relief cuts.
@@ -37,20 +32,10 @@ if TYPE_CHECKING:
 
 @dataclass
 class BraceTenon:
-    """
-    Creates a tenon on a brace (applied while brace is horizontal).
+    """Shouldered tenon for diagonal braces (full height, with release cuts).
     
-    The brace should be axis-aligned along X when this is applied.
-    The angle is read from the PositionedBrace object or passed explicitly.
-    
-    The tenon is always FULL HEIGHT of the brace to simplify the joint geometry.
-    
-    Args:
-        brace: The brace (PositionedBrace object or Part)
-        tenon_width: Width of tenon (Y direction, typically 1/3 brace width)
-        tenon_length: How far tenon projects (60-100mm typical)
-        brace_angle: Angle from horizontal in degrees (optional if brace is PositionedBrace)
-        at_start: If True, tenon at start; if False, at end
+    Apply while brace is horizontal/axis-aligned along X. The angle is read
+    from PositionedBrace or passed explicitly.
     """
 
     brace: Union[Part, "PositionedBrace"]
@@ -63,7 +48,7 @@ class BraceTenon:
     shape: Part = field(init=False, repr=False)
     rotated_cut_bbox_height: float = field(init=False, repr=False)
     rotated_cut_bbox_width: float = field(init=False, repr=False)
-    tenon_height: float = field(init=False, repr=False)  # Computed as full brace height
+    tenon_height: float = field(init=False, repr=False)
 
     def __post_init__(self):
         # Import here to avoid circular import
@@ -89,21 +74,7 @@ class BraceTenon:
         brace_height: float,
         shoulder_depth: float,
     ) -> Part:
-        """Create release cuts on the tenon tip.
-        
-        Simple approach: create a box at the tenon tip, rotate it by the
-        brace angle, then subtract. This creates a cut that will be 
-        vertical after the brace is rotated into position.
-        
-        For at_start=False, we mirror the shape around the center of the brace.
-        
-        Args:
-            brace_bbox_min_x: Minimum X coordinate of the brace bounding box
-            brace_bbox_max_x: Maximum X coordinate of the brace bounding box
-            brace_width: Width of the brace (Y direction)
-            brace_height: Height of the brace (Z direction)
-            shoulder_depth: Depth of the shoulder cut
-        """
+        """Create release cuts on tenon tip (rotated boxes that become vertical after brace rotation)."""
         from build123d import Axis, Align, Plane
         
         # Release cut box size - make it big enough
@@ -136,14 +107,7 @@ class BraceTenon:
         return Part(release_box.wrapped)
 
     def _create_brace_tenon(self) -> tuple[Part, float, float]:
-        """
-        Apply shouldered tenon to the axis-aligned brace.
-        The shoulder depth is calculated from the brace angle.
-        Tenon is always full height of the brace.
-        
-        Returns:
-            (shape, rotated_cut_bbox_height, rotated_cut_bbox_width) - the cut brace and penetration depths
-        """
+        """Apply shouldered tenon with full height and release cuts. Returns (shape, rotated_height, rotated_width)."""
         brace_shape = self._brace_shape
         
         # Get dimensions of brace - need bounding box for position info

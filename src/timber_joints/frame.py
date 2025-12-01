@@ -40,7 +40,6 @@ class Element:
     shape: Part = field(init=False, repr=False)
     
     def __post_init__(self):
-        """Build the positioned shape."""
         self.shape = self.beam.shape
         if self.rotation:
             axis, angle = self.rotation
@@ -50,7 +49,6 @@ class Element:
     @classmethod
     def post(cls, name: str, length: float, width: float, height: float,
              location: Location = None) -> "Element":
-        """Create a vertical post."""
         beam = Beam(length, width, height)
         loc = location or Location((0, 0, 0))
         return cls(name, beam, Role.POST, loc, rotation=(Axis.Y, -90))
@@ -58,7 +56,6 @@ class Element:
     @classmethod
     def horizontal(cls, name: str, role: Role, length: float, width: float, height: float,
                    location: Location = None) -> "Element":
-        """Create a horizontal element (beam, girt, plate, sill)."""
         beam = Beam(length, width, height)
         loc = location or Location((0, 0, 0))
         return cls(name, beam, role, loc)
@@ -71,14 +68,11 @@ class Joint:
     element_a: Element  # Typically the receiving member (mortise)
     element_b: Element  # Typically the inserting member (tenon)
     joint_type: str = "mortise_tenon"
-    
-    # Joint parameters
     tenon_width: float = None
     tenon_height: float = None  
     tenon_length: float = 60.0
     
     def __post_init__(self):
-        """Set default tenon dimensions if not specified."""
         if self.tenon_width is None:
             self.tenon_width = self.element_b.beam.width / 3
         if self.tenon_height is None:
@@ -93,27 +87,23 @@ class TimberFrame:
     joints: list[Joint] = field(default_factory=list)
     
     def add(self, element: Element) -> "TimberFrame":
-        """Add an element to the frame."""
         self.elements[element.name] = element
         return self
     
     def add_post(self, name: str, length: float, width: float, height: float,
                  x: float = 0, y: float = 0, z: float = 0) -> "TimberFrame":
-        """Add a vertical post at position."""
         elem = Element.post(name, length, width, height, Location((x, y, z)))
         return self.add(elem)
     
     def add_beam(self, name: str, length: float, width: float, height: float,
                  x: float = 0, y: float = 0, z: float = 0,
                  role: Role = Role.BEAM) -> "TimberFrame":
-        """Add a horizontal beam at position."""
         elem = Element.horizontal(name, role, length, width, height, Location((x, y, z)))
         return self.add(elem)
     
     def join(self, element_a_name: str, element_b_name: str,
              joint_type: str = "mortise_tenon",
              tenon_length: float = 60.0) -> "TimberFrame":
-        """Create a joint between two elements."""
         elem_a = self.elements[element_a_name]
         elem_b = self.elements[element_b_name]
         joint = Joint(
@@ -136,17 +126,7 @@ class TimberFrame:
         housing_depth: float = 20.0,
         post_top_extension: float = 40.0,
     ) -> "TimberFrame":
-        """Join a beam to a post with a shouldered tenon joint.
-        
-        Args:
-            post_name: Name of the post element (receives mortise)
-            beam_name: Name of the beam element (gets tenon)
-            at_start: If True, tenon at beam start (left); if False, at end (right)
-            tenon_length: Length of the tenon projection
-            shoulder_depth: Depth of the angled shoulder
-            housing_depth: How far from post edge the mortise stops
-            post_top_extension: Extra mortise depth above beam
-        """
+        """Join a beam to a post with a shouldered tenon joint."""
         post_elem = self.elements[post_name]
         beam_elem = self.elements[beam_name]
         
@@ -265,14 +245,12 @@ class TimberFrame:
     
     @property
     def shape(self) -> Part:
-        """Combine all elements into a single shape."""
         if not self.elements:
             return Part()
         shapes = [e.shape for e in self.elements.values()]
         return Compound(shapes)
     
     def by_role(self, role: Role) -> list[Element]:
-        """Get all elements with a specific role."""
         return [e for e in self.elements.values() if e.role == role]
     
     @property
@@ -305,13 +283,9 @@ def simple_bent(
 ) -> TimberFrame:
     """Create a simple bent (two posts with connecting beam).
     
-    A bent is the basic unit of timber framing - a 2D portal frame.
-    
-         ┌─────────────────────┐  <- Beam (tie beam/plate)
-         │                     │
+         ┌─────────────────────┐  <- Beam
          │                     │
          │                     │  <- Posts
-         │                     │
          ╧                     ╧
     """
     frame = TimberFrame(name)

@@ -23,10 +23,7 @@ from timber_joints.utils import create_vertical_cut
 
 @dataclass
 class BarnConfig:
-    """Configuration for a barn frame.
-    
-    All dimensions in millimeters.
-    """
+    """Configuration for a barn frame (all dimensions in mm)."""
     # Post dimensions
     post_height: float = 3000
     post_section: float = 150
@@ -89,7 +86,6 @@ class BarnConfig:
 
     @property
     def girt_length(self) -> float:
-        """Total girt length spanning all bents."""
         return (self.num_bents - 1) * self.bent_spacing + self.post_section
 
 
@@ -110,21 +106,9 @@ class BarnFrame:
     
     Example::
     
-        config = BarnConfig(
-            post_height=3000,
-            beam_length=5000,
-            num_bents=3,
-            bent_spacing=3000,
-        )
+        config = BarnConfig(post_height=3000, beam_length=5000, num_bents=3)
         barn = BarnFrame.build(config)
-        
-        # Access parts
-        for bent in barn.bents:
-            show_object(bent.left_post)
-            show_object(bent.beam)
-        
-        show_object(barn.left_girt)
-        show_object(barn.right_girt)
+        barn.show(show_object)
     """
     config: BarnConfig
     bents: list[Bent] = field(default_factory=list)
@@ -134,7 +118,6 @@ class BarnFrame:
     
     @classmethod
     def build(cls, config: BarnConfig) -> "BarnFrame":
-        """Build a complete barn frame from configuration."""
         barn = cls(config=config)
         barn._build_bents()
         if config.include_girts:
@@ -144,7 +127,6 @@ class BarnFrame:
         return barn
     
     def _build_bents(self):
-        """Build all bents and move them to their Y positions."""
         config = self.config
         
         # Tenon dimensions for post tops (if girts are used)
@@ -217,7 +199,6 @@ class BarnFrame:
             ))
     
     def _build_girts(self):
-        """Build girts connecting all bents."""
         config = self.config
         
         # Get post X positions from first bent
@@ -259,7 +240,6 @@ class BarnFrame:
         self.right_girt = right_girt
     
     def _build_girt_braces(self):
-        """Build braces running under girts (longitudinal bracing)."""
         if not self.left_girt or not self.right_girt:
             return
         
@@ -278,7 +258,6 @@ class BarnFrame:
                 self._add_girt_brace(bent, toward_plus_y=False, index=i, suffix="b")
     
     def _add_girt_brace(self, bent: Bent, toward_plus_y: bool, index: int, suffix: str = ""):
-        """Add girt braces for a single bent."""
         config = self.config
         at_girt_start = not toward_plus_y  # at_girt_start=True means toward -Y
         
@@ -303,7 +282,6 @@ class BarnFrame:
         self.girt_braces.append((f"girt_brace_right_{index+1}{suffix}", right_brace))
     
     def all_parts(self) -> list[tuple[Part, str]]:
-        """Get all parts with their names for visualization."""
         parts = []
         
         for i, bent in enumerate(self.bents):
@@ -326,11 +304,7 @@ class BarnFrame:
         return parts
     
     def show(self, show_object_func):
-        """Display the barn frame using provided show_object function.
-        
-        Args:
-            show_object_func: The show_object function from ocp_vscode
-        """
+        """Display the barn frame using provided show_object function."""
         for part, name in self.all_parts():
             if "brace" in name.lower():
                 show_object_func(part, name=name, options={"color": "orange"})
@@ -344,7 +318,6 @@ class BarnFrame:
                 show_object_func(part, name=name)
     
     def summary(self) -> str:
-        """Get a summary of the barn frame configuration."""
         config = self.config
         lines = [
             f"Barn Frame Summary",
@@ -381,16 +354,7 @@ class BarnFrame:
         return "\n".join(lines)
     
     def to_fea_frame(self):
-        """Create an FEA TimberFrame from this barn for structural analysis.
-        
-        Returns:
-            timber_joints.fea.TimberFrame ready for analyze()
-            
-        Example:
-            barn = BarnFrame.build(config)
-            fea_frame = barn.to_fea_frame()
-            result = fea_frame.analyze(output_dir=Path("output"))
-        """
+        """Create an FEA TimberFrame from this barn for structural analysis."""
         from timber_joints.fea import TimberFrame, MemberType
         
         frame = TimberFrame()
