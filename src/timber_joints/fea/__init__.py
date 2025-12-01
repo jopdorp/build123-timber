@@ -118,6 +118,10 @@ from .meshing import (
     get_boundary_faces,
     combine_meshes,
     write_mesh_inp,
+    # Mesh visualization and contact detection
+    C3D4_FACE_NODE_INDICES,
+    build_mesh_faces_compound,
+    find_mesh_contact_faces,
 )
 
 # =============================================================================
@@ -179,6 +183,9 @@ __all__ = [
     "get_boundary_faces",
     "combine_meshes",
     "write_mesh_inp",
+    "C3D4_FACE_NODE_INDICES",
+    "build_mesh_faces_compound",
+    "find_mesh_contact_faces",
     # CalculiX
     "ContactParameters",
     "StepParameters",

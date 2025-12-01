@@ -56,12 +56,15 @@ from timber_joints.analysis import (
     analyze_element,
     analyze_frame,
     print_analysis_summary,
-    # Contact surface utilities
+    # Shape utilities
     get_bbox_solid,
     scale_shape_in_place,
     expand_shape_by_margin,
+)
+
+# Mesh utilities (from fea.meshing)
+from timber_joints.fea.meshing import (
     find_mesh_contact_faces,
-    find_mesh_faces_on_surface,
     build_mesh_faces_compound,
 )
 
@@ -112,11 +115,11 @@ __all__ = [
     "analyze_element",
     "analyze_frame",
     "print_analysis_summary",
-    # Contact surface utilities
+    # Shape utilities
     "get_bbox_solid",
     "scale_shape_in_place",
     "expand_shape_by_margin",
+    # Mesh utilities
     "find_mesh_contact_faces",
-    "find_mesh_faces_on_surface",
     "build_mesh_faces_compound",
 ]

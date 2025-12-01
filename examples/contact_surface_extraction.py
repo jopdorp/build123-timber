@@ -109,7 +109,8 @@ from build123d import Location, Compound, export_step
 from pathlib import Path
 import gmsh
 from timber_joints.alignment import build_complete_bent
-from timber_joints.analysis import expand_shape_by_margin, find_mesh_contact_faces
+from timber_joints.analysis import expand_shape_by_margin
+from timber_joints.fea.meshing import find_mesh_contact_faces, build_mesh_faces_compound
 
 # Build a fresh bent
 bent3 = build_complete_bent(
@@ -182,48 +183,7 @@ beam_contact_faces, post_contact_faces = find_mesh_contact_faces(
 print(f"Beam contact: {len(beam_contact_faces)} mesh faces")
 print(f"Post contact: {len(post_contact_faces)} mesh faces")
 
-# Visualize the mesh faces
-from OCP.BRepBuilderAPI import BRepBuilderAPI_MakePolygon, BRepBuilderAPI_MakeFace
-from OCP.gp import gp_Pnt
-from OCP.BRep import BRep_Builder
-from OCP.TopoDS import TopoDS_Compound
-
-# C3D4 face node indices (which 3 nodes form each of the 4 faces of a tetrahedron)
-face_node_indices = [(0, 1, 2), (0, 1, 3), (1, 2, 3), (0, 2, 3)]
-
-def build_mesh_faces_compound(mesh_faces, elements, nodes):
-    """Build a compound of triangular faces from mesh face list."""
-    elem_dict = {eid: enodes for eid, enodes in elements}
-    builder = BRep_Builder()
-    compound = TopoDS_Compound()
-    builder.MakeCompound(compound)
-    
-    for elem_id, face_num in mesh_faces:
-        if elem_id not in elem_dict:
-            continue
-        elem_nodes = elem_dict[elem_id]
-        i, j, k = face_node_indices[face_num - 1]  # face_num is 1-based
-        n1, n2, n3 = elem_nodes[i], elem_nodes[j], elem_nodes[k]
-        
-        if n1 not in nodes or n2 not in nodes or n3 not in nodes:
-            continue
-        
-        p1 = gp_Pnt(*nodes[n1])
-        p2 = gp_Pnt(*nodes[n2])
-        p3 = gp_Pnt(*nodes[n3])
-        
-        try:
-            polygon = BRepBuilderAPI_MakePolygon(p1, p2, p3, True)
-            if polygon.IsDone():
-                face_maker = BRepBuilderAPI_MakeFace(polygon.Wire(), True)
-                if face_maker.IsDone():
-                    builder.Add(compound, face_maker.Face())
-        except:
-            pass
-    
-    return Compound(compound)
-
-# Build mesh face compounds
+# Build mesh face compounds using library function
 beam_contact_compound = build_mesh_faces_compound(beam_contact_faces, beam_elements, beam_nodes)
 post_contact_compound = build_mesh_faces_compound(post_contact_faces, left_post_elements, left_post_nodes)
 

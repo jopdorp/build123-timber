@@ -45,8 +45,8 @@ from ..meshing import (
     expand_bbox,
     combine_meshes,
     write_mesh_inp,
+    find_mesh_contact_faces,
 )
-from ...analysis import find_mesh_contact_faces
 
 
 @dataclass

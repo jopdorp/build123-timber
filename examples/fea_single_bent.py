@@ -2,11 +2,15 @@
 """FEA test using high-level frame API."""
 
 from pathlib import Path
-from build123d import Location
+import tempfile
+from build123d import Location, export_step
 from ocp_vscode import reset_show, show_object
 
 from timber_joints.alignment import build_complete_bent, BraceParams
-from timber_joints.fea import TimberFrame, show_fea_results, LoadBC
+from timber_joints.fea import (
+    TimberFrame, show_fea_results, LoadBC,
+    mesh_part, get_boundary_faces, build_mesh_faces_compound,
+)
 
 reset_show()
 
@@ -47,12 +51,23 @@ show_object(beam, name="CAD: Beam", options={"color": "burlywood", "alpha": 0.5}
 for i, brace in enumerate(braces):
     show_object(brace, name=f"CAD: Brace {i}", options={"color": "orange", "alpha": 0.5})
 
-# 2. Mesh geometry (triangulated surfaces)
+# 2. Mesh geometry (triangulated surfaces) - using meshing utilities directly
 print("Generating mesh geometry...")
-mesh_geometry = frame.get_mesh_geometry(mesh_size=50.0)
-print(f"Generated {len(mesh_geometry)} mesh parts")
+with tempfile.TemporaryDirectory() as tmpdir:
+    mesh_compounds = []
+    for member in frame.members:
+        step_path = Path(tmpdir) / f"{member.name}.step"
+        export_step(member.shape, str(step_path))
+        mesh = mesh_part(str(step_path), member.name, mesh_size=50.0)
+        
+        elems = [(i + 1, e) for i, e in enumerate(mesh.elements)]
+        boundary_faces = get_boundary_faces(elems)
+        mesh_compound = build_mesh_faces_compound(boundary_faces, elems, mesh.nodes)
+        mesh_compounds.append((member.name, mesh_compound))
 
-for name, mesh_compound in mesh_geometry:
+print(f"Generated {len(mesh_compounds)} mesh parts")
+
+for name, mesh_compound in mesh_compounds:
     mesh_offset = mesh_compound.move(Location((0, Y_MESH, 0)))
     show_object(mesh_offset, name=f"Mesh: {name}", options={"color": "lightgray", "alpha": 0.7})
 

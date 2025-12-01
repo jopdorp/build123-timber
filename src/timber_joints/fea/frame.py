@@ -257,36 +257,6 @@ class TimberFrame:
             b1.max.Z + margin < b2.min.Z or b2.max.Z + margin < b1.min.Z
         )
     
-    def get_mesh_geometry(self, mesh_size: float = 50.0) -> List[Tuple[str, "Compound"]]:
-        """Get mesh geometry for all members as visualizable Compounds.
-        
-        Args:
-            mesh_size: Mesh element size
-            
-        Returns:
-            List of tuples: (name, mesh_compound)
-        """
-        from timber_joints.analysis import build_mesh_faces_compound
-        from .meshing import mesh_part, get_boundary_faces
-        from pathlib import Path
-        import tempfile
-        from build123d import export_step
-        
-        results = []
-        
-        with tempfile.TemporaryDirectory() as tmpdir:
-            for member in self.members:
-                step_path = Path(tmpdir) / f"{member.name}.step"
-                export_step(member.shape, str(step_path))
-                mesh = mesh_part(str(step_path), member.name, mesh_size)
-                
-                elems = [(i + 1, e) for i, e in enumerate(mesh.elements)]
-                boundary_faces = get_boundary_faces(elems)
-                mesh_compound = build_mesh_faces_compound(boundary_faces, elems, mesh.nodes)
-                results.append((member.name, mesh_compound))
-        
-        return results
-    
     def get_contact_surfaces(self, mesh_size: float = 50.0) -> List[Tuple[str, str, "Compound", "Compound"]]:
         """Get mesh contact surfaces for all detected member pairs.
         
@@ -299,8 +269,7 @@ class TimberFrame:
         Returns:
             List of tuples: (name_a, name_b, surface_a, surface_b)
         """
-        from timber_joints.analysis import find_mesh_contact_faces, build_mesh_faces_compound
-        from .meshing import mesh_part
+        from .meshing import mesh_part, find_mesh_contact_faces, build_mesh_faces_compound
         from pathlib import Path
         import tempfile
         from build123d import export_step

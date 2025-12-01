@@ -2,8 +2,10 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Tuple
 import gmsh
+
+from build123d import Compound
 
 
 @dataclass
@@ -312,3 +314,191 @@ def write_mesh_inp(
                     f.write(f"*SURFACE, NAME={surf_name}, TYPE=ELEMENT\n")
                     for elem_id, face in faces:
                         f.write(f"{elem_id}, S{face}\n")
+
+
+# =============================================================================
+# Mesh Visualization and Contact Detection
+# =============================================================================
+
+# C3D4 face node indices (which 3 nodes form each of the 4 faces of a tetrahedron)
+C3D4_FACE_NODE_INDICES = [(0, 1, 2), (0, 1, 3), (1, 2, 3), (0, 2, 3)]
+
+
+def build_mesh_faces_compound(
+    mesh_faces: List[Tuple[int, int]],
+    elements: List[Tuple[int, List[int]]],
+    nodes: dict
+) -> Compound:
+    """
+    Build a build123d Compound of triangular faces from mesh face definitions.
+    
+    Useful for visualizing contact surfaces or any mesh faces in OCP viewer.
+    
+    Args:
+        mesh_faces: List of (element_id, face_number) tuples where face_number is 1-4
+        elements: List of (element_id, [n1, n2, n3, n4]) tuples (C3D4 tetrahedra)
+        nodes: Dict mapping node_id to (x, y, z) coordinates
+    
+    Returns:
+        A build123d Compound containing triangular faces for visualization
+    """
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakePolygon, BRepBuilderAPI_MakeFace
+    from OCP.gp import gp_Pnt
+    from OCP.BRep import BRep_Builder
+    from OCP.TopoDS import TopoDS_Compound
+    
+    elem_dict = {eid: enodes for eid, enodes in elements}
+    builder = BRep_Builder()
+    compound = TopoDS_Compound()
+    builder.MakeCompound(compound)
+    
+    for elem_id, face_num in mesh_faces:
+        if elem_id not in elem_dict:
+            continue
+        elem_nodes = elem_dict[elem_id]
+        i, j, k = C3D4_FACE_NODE_INDICES[face_num - 1]  # face_num is 1-based
+        n1, n2, n3 = elem_nodes[i], elem_nodes[j], elem_nodes[k]
+        
+        if n1 not in nodes or n2 not in nodes or n3 not in nodes:
+            continue
+        
+        p1 = gp_Pnt(*nodes[n1])
+        p2 = gp_Pnt(*nodes[n2])
+        p3 = gp_Pnt(*nodes[n3])
+        
+        try:
+            polygon = BRepBuilderAPI_MakePolygon(p1, p2, p3, True)
+            if polygon.IsDone():
+                face_maker = BRepBuilderAPI_MakeFace(polygon.Wire(), True)
+                if face_maker.IsDone():
+                    builder.Add(compound, face_maker.Face())
+        except Exception:
+            pass
+    
+    return Compound(compound)
+
+
+def find_mesh_contact_faces(
+    elements_a: List[Tuple[int, List[int]]],
+    nodes_a: dict,
+    elements_b: List[Tuple[int, List[int]]],
+    nodes_b: dict,
+    margin: float = 1.0
+) -> Tuple[List[Tuple[int, int]], List[Tuple[int, int]]]:
+    """
+    Find mesh element faces at the contact region between two meshed parts.
+    
+    Pure mesh-based approach - no CAD geometry needed:
+    1. Find boundary faces (faces only used by one element = surface faces)
+    2. Compute bounding boxes of both meshes
+    3. Find the intersection region of the bounding boxes (with margin)
+    4. Return boundary faces from each part that lie in the intersection region
+    
+    Args:
+        elements_a: Elements of mesh A as (element_id, [n1, n2, n3, n4]) tuples
+        nodes_a: Nodes of mesh A as {node_id: (x, y, z)}
+        elements_b: Elements of mesh B as (element_id, [n1, n2, n3, n4]) tuples
+        nodes_b: Nodes of mesh B as {node_id: (x, y, z)}
+        margin: Margin (mm) to expand the intersection region for tolerance
+    
+    Returns:
+        Tuple of (faces_a, faces_b) where each is a list of (element_id, face_number)
+        for CalculiX ``*SURFACE`` definition. Face numbers are 1-4 for C3D4 elements.
+    """
+    def get_boundary_faces_dict(elements):
+        """
+        Find boundary faces - faces that appear in only one element.
+        Returns dict mapping (elem_id, face_num) to sorted node tuple.
+        """
+        face_count = {}
+        
+        for elem_id, elem_nodes in elements:
+            for face_idx, (i, j, k) in enumerate(C3D4_FACE_NODE_INDICES):
+                n1, n2, n3 = elem_nodes[i], elem_nodes[j], elem_nodes[k]
+                face_key = tuple(sorted([n1, n2, n3]))
+                if face_key not in face_count:
+                    face_count[face_key] = []
+                face_count[face_key].append((elem_id, face_idx + 1))
+        
+        # Boundary faces appear exactly once
+        boundary_faces = {}
+        for face_key, occurrences in face_count.items():
+            if len(occurrences) == 1:
+                elem_id, face_num = occurrences[0]
+                boundary_faces[(elem_id, face_num)] = face_key
+        
+        return boundary_faces
+    
+    def get_mesh_bbox(nodes: dict):
+        """Get bounding box of mesh nodes."""
+        coords = list(nodes.values())
+        if not coords:
+            return None
+        min_x = min(c[0] for c in coords)
+        max_x = max(c[0] for c in coords)
+        min_y = min(c[1] for c in coords)
+        max_y = max(c[1] for c in coords)
+        min_z = min(c[2] for c in coords)
+        max_z = max(c[2] for c in coords)
+        return (min_x, max_x, min_y, max_y, min_z, max_z)
+    
+    def bbox_intersection(bbox_a, bbox_b, margin):
+        """Find intersection of two bounding boxes, expanded by margin."""
+        min_x = max(bbox_a[0], bbox_b[0]) - margin
+        max_x = min(bbox_a[1], bbox_b[1]) + margin
+        min_y = max(bbox_a[2], bbox_b[2]) - margin
+        max_y = min(bbox_a[3], bbox_b[3]) + margin
+        min_z = max(bbox_a[4], bbox_b[4]) - margin
+        max_z = min(bbox_a[5], bbox_b[5]) + margin
+        
+        if min_x > max_x or min_y > max_y or min_z > max_z:
+            return None
+        return (min_x, max_x, min_y, max_y, min_z, max_z)
+    
+    def face_in_bbox(face_nodes, nodes, bbox):
+        """Check if all 3 nodes of a face are inside the bounding box."""
+        for nid in face_nodes:
+            if nid not in nodes:
+                return False
+            x, y, z = nodes[nid]
+            if not (bbox[0] <= x <= bbox[1] and
+                    bbox[2] <= y <= bbox[3] and
+                    bbox[4] <= z <= bbox[5]):
+                return False
+        return True
+    
+    print("  Finding boundary faces...")
+    boundary_a = get_boundary_faces_dict(elements_a)
+    boundary_b = get_boundary_faces_dict(elements_b)
+    print(f"  Mesh A: {len(boundary_a)} boundary faces, Mesh B: {len(boundary_b)} boundary faces")
+    
+    bbox_a = get_mesh_bbox(nodes_a)
+    bbox_b = get_mesh_bbox(nodes_b)
+    
+    if bbox_a is None or bbox_b is None:
+        print("  Could not compute bounding boxes!")
+        return [], []
+    
+    print(f"  Mesh A bbox: X[{bbox_a[0]:.1f}, {bbox_a[1]:.1f}] Y[{bbox_a[2]:.1f}, {bbox_a[3]:.1f}] Z[{bbox_a[4]:.1f}, {bbox_a[5]:.1f}]")
+    print(f"  Mesh B bbox: X[{bbox_b[0]:.1f}, {bbox_b[1]:.1f}] Y[{bbox_b[2]:.1f}, {bbox_b[3]:.1f}] Z[{bbox_b[4]:.1f}, {bbox_b[5]:.1f}]")
+    
+    intersection = bbox_intersection(bbox_a, bbox_b, margin)
+    if intersection is None:
+        print("  No bounding box intersection found!")
+        return [], []
+    
+    print(f"  Intersection (±{margin}mm): X[{intersection[0]:.1f}, {intersection[1]:.1f}] Y[{intersection[2]:.1f}, {intersection[3]:.1f}] Z[{intersection[4]:.1f}, {intersection[5]:.1f}]")
+    
+    faces_a = []
+    for (elem_id, face_num), face_nodes in boundary_a.items():
+        if face_in_bbox(face_nodes, nodes_a, intersection):
+            faces_a.append((elem_id, face_num))
+    
+    faces_b = []
+    for (elem_id, face_num), face_nodes in boundary_b.items():
+        if face_in_bbox(face_nodes, nodes_b, intersection):
+            faces_b.append((elem_id, face_num))
+    
+    print(f"  Found {len(faces_a)} faces from mesh A, {len(faces_b)} faces from mesh B in contact region")
+    
+    return faces_a, faces_b

@@ -25,6 +25,7 @@ from .meshing import (
     expand_bbox,
     combine_meshes,
     write_mesh_inp,
+    find_mesh_contact_faces,
 )
 from .calculix import (
     ContactParameters,
@@ -38,7 +39,6 @@ from .calculix import (
     BEAM_HORIZONTAL_X,
     POST_VERTICAL_Z,
 )
-from ..analysis import find_mesh_contact_faces
 
 
 # =============================================================================
