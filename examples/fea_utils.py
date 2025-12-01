@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import List, Tuple, Optional, Callable
 
 from build123d import Location, Part
-from ocp_vscode import show_object
+from ocp_vscode import show
 
 from timber_joints.fea import (
     TimberFrame, LoadBC, show_fea_results,
@@ -46,7 +46,10 @@ def visualize_frame_with_mesh(
     Returns:
         MeshingResult from frame.mesh()
     """
-    # 1. Show CAD geometry
+    # Collect all objects to show at once (avoids O(n²) re-rendering)
+    objects_to_show = []
+    
+    # 1. Collect CAD geometry
     if verbose:
         print(f"CAD geometry at {offset_axis}={cad_offset}")
     
@@ -55,7 +58,7 @@ def visualize_frame_with_mesh(
             offset_shape = shape.move(Location((cad_offset, 0, 0)))
         else:
             offset_shape = shape.move(Location((0, cad_offset, 0)))
-        show_object(offset_shape, name=f"CAD: {name}", options={"color": color, "alpha": 0.5})
+        objects_to_show.append((offset_shape, f"CAD: {name}", {"color": color, "alpha": 0.5}))
     
     # 2. Generate mesh with contact detection (cached for later analysis)
     if verbose:
@@ -68,7 +71,7 @@ def visualize_frame_with_mesh(
         verbose=verbose,
     )
     
-    # 3. Visualize mesh boundaries
+    # 3. Collect mesh boundaries
     if verbose:
         print(f"\nRefined mesh: {meshing_result.total_nodes} nodes, {meshing_result.total_elements} elements")
     
@@ -82,12 +85,12 @@ def visualize_frame_with_mesh(
         else:
             mesh_vis = mesh_compound.move(Location((0, mesh_offset, 0)))
         
-        show_object(mesh_vis, name=f"Mesh: {part_name}", options={"color": "lightgray", "alpha": 0.7})
+        objects_to_show.append((mesh_vis, f"Mesh: {part_name}", {"color": "lightgray", "alpha": 0.7}))
         
         if verbose:
             print(f"  {part_name}: {mesh.num_nodes} nodes, {mesh.num_elements} elements, {len(boundary_faces)} boundary faces")
     
-    # 4. Visualize contact surfaces with tenon/mortise distinction
+    # 4. Collect contact surfaces with tenon/mortise distinction
     if verbose:
         print(f"\nContact surfaces:")
     
@@ -118,10 +121,22 @@ def visualize_frame_with_mesh(
             surface_vis = mesh_compound.move(Location((0, contact_offset, 0)))
         
         label = "mortise" if is_mortise else "tenon"
-        show_object(surface_vis, name=f"Contact: {surf_name} ({label})", options={"color": color})
+        objects_to_show.append((surface_vis, f"Contact: {surf_name} ({label})", {"color": color}))
         
         if verbose:
             print(f"  {surf_name} ({label}): {len(faces)} faces")
+    
+    # 5. Show all objects at once (single render, not O(n²))
+    if verbose:
+        print(f"\nShowing {len(objects_to_show)} objects...")
+    
+    # Unpack into format that show() expects: show(*objects, names=[...], colors=[...])
+    shapes = [obj for obj, name, opts in objects_to_show]
+    names = [name for obj, name, opts in objects_to_show]
+    colors = [opts.get("color", "gray") for obj, name, opts in objects_to_show]
+    alphas = [opts.get("alpha", 1.0) for obj, name, opts in objects_to_show]
+    
+    show(*shapes, names=names, colors=colors, alphas=alphas)
     
     if verbose:
         print(f"\nVisualization offsets ({offset_axis} axis):")

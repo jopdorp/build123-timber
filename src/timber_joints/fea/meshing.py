@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List, Tuple, Dict
 import gmsh
+import numpy as np
+from scipy.spatial import cKDTree
 
 from build123d import Compound
 
@@ -385,6 +387,8 @@ def find_mesh_contact_faces(
     nodes_b: dict,
     margin: float = 1.0,
     verbose: bool = True,
+    boundary_faces_a: Optional[dict] = None,
+    boundary_faces_b: Optional[dict] = None,
 ) -> Tuple[List[Tuple[int, int]], List[Tuple[int, int]]]:
     """
     Find mesh element faces at the contact region between two meshed parts.
@@ -402,38 +406,13 @@ def find_mesh_contact_faces(
         elements_b: Elements of mesh B as (element_id, [n1, n2, n3, n4]) tuples
         nodes_b: Nodes of mesh B as {node_id: (x, y, z)}
         margin: Maximum distance (mm) between faces to be considered in contact
+        boundary_faces_a: Pre-computed boundary faces for mesh A (optional, for reuse)
+        boundary_faces_b: Pre-computed boundary faces for mesh B (optional, for reuse)
     
     Returns:
         Tuple of (faces_a, faces_b) where each is a list of (element_id, face_number)
         for CalculiX ``*SURFACE`` definition. Face numbers are 1-4 for C3D4 elements.
     """
-    from scipy.spatial import cKDTree
-    import numpy as np
-    
-    def get_boundary_faces_dict(elements):
-        """
-        Find boundary faces - faces that appear in only one element.
-        Returns dict mapping (elem_id, face_num) to sorted node tuple.
-        """
-        face_count = {}
-        
-        for elem_id, elem_nodes in elements:
-            for face_idx, (i, j, k) in enumerate(C3D4_FACE_NODE_INDICES):
-                n1, n2, n3 = elem_nodes[i], elem_nodes[j], elem_nodes[k]
-                face_key = tuple(sorted([n1, n2, n3]))
-                if face_key not in face_count:
-                    face_count[face_key] = []
-                face_count[face_key].append((elem_id, face_idx + 1))
-        
-        # Boundary faces appear exactly once
-        boundary_faces = {}
-        for face_key, occurrences in face_count.items():
-            if len(occurrences) == 1:
-                elem_id, face_num = occurrences[0]
-                boundary_faces[(elem_id, face_num)] = face_key
-        
-        return boundary_faces
-    
     def get_face_centroid(face_nodes, nodes):
         """Get centroid of a triangular face."""
         coords = [nodes[nid] for nid in face_nodes if nid in nodes]
@@ -475,10 +454,17 @@ def find_mesh_contact_faces(
                 bbox[2] <= point[1] <= bbox[3] and
                 bbox[4] <= point[2] <= bbox[5])
     
-    if verbose:
-        print("  Finding boundary faces...")
-    boundary_a = get_boundary_faces_dict(elements_a)
-    boundary_b = get_boundary_faces_dict(elements_b)
+    # Use pre-computed boundary faces if provided, otherwise compute
+    if boundary_faces_a is None:
+        boundary_a = get_boundary_faces_dict(elements_a)
+    else:
+        boundary_a = boundary_faces_a
+        
+    if boundary_faces_b is None:
+        boundary_b = get_boundary_faces_dict(elements_b)
+    else:
+        boundary_b = boundary_faces_b
+        
     if verbose:
         print(f"  Mesh A: {len(boundary_a)} boundary faces, Mesh B: {len(boundary_b)} boundary faces")
     
@@ -550,6 +536,33 @@ def find_mesh_contact_faces(
         print(f"  Found {len(contact_faces_a)} faces from mesh A, {len(contact_faces_b)} faces from mesh B within {margin}mm")
     
     return contact_faces_a, contact_faces_b
+
+
+def get_boundary_faces_dict(elements: List[Tuple[int, List[int]]]) -> dict:
+    """
+    Find boundary faces - faces that appear in only one element.
+    Returns dict mapping (elem_id, face_num) to sorted node tuple.
+    
+    This is a performance-critical function - compute once per mesh and reuse.
+    """
+    face_count = {}
+    
+    for elem_id, elem_nodes in elements:
+        for face_idx, (i, j, k) in enumerate(C3D4_FACE_NODE_INDICES):
+            n1, n2, n3 = elem_nodes[i], elem_nodes[j], elem_nodes[k]
+            face_key = tuple(sorted([n1, n2, n3]))
+            if face_key not in face_count:
+                face_count[face_key] = []
+            face_count[face_key].append((elem_id, face_idx + 1))
+    
+    # Boundary faces appear exactly once
+    boundary_faces = {}
+    for face_key, occurrences in face_count.items():
+        if len(occurrences) == 1:
+            elem_id, face_num = occurrences[0]
+            boundary_faces[(elem_id, face_num)] = face_key
+    
+    return boundary_faces
 
 
 # =============================================================================
@@ -627,6 +640,18 @@ def mesh_parts_with_contact_refinement(
             step_file, part_name.lower(), config.element_size
         )
     
+    # Pre-compute boundary faces for all coarse meshes (expensive, do once)
+    if verbose:
+        print("  Pre-computing boundary faces...")
+    coarse_boundary_faces = {}
+    coarse_elems = {}  # Cache element lists to avoid recreating for each contact
+    for part_name, mesh in coarse_meshes.items():
+        elems = [(i + 1, e) for i, e in enumerate(mesh.elements)]
+        coarse_elems[part_name] = elems
+        coarse_boundary_faces[part_name] = get_boundary_faces_dict(elems)
+        if verbose:
+            print(f"    {part_name}: {len(coarse_boundary_faces[part_name])} boundary faces")
+    
     # Find contact regions and build refinement boxes
     refinement_boxes: Dict[str, List[RefinementBox]] = {name: [] for name in part_names}
     
@@ -634,14 +659,16 @@ def mesh_parts_with_contact_refinement(
         mesh_a = coarse_meshes[contact.part_a]
         mesh_b = coarse_meshes[contact.part_b]
         
-        elems_a = [(i + 1, e) for i, e in enumerate(mesh_a.elements)]
-        elems_b = [(i + 1, e) for i, e in enumerate(mesh_b.elements)]
+        elems_a = coarse_elems[contact.part_a]
+        elems_b = coarse_elems[contact.part_b]
         
         faces_a, faces_b = find_mesh_contact_faces(
             elems_a, mesh_a.nodes,
             elems_b, mesh_b.nodes,
             margin=config.element_size + config.contact_gap,
             verbose=verbose,
+            boundary_faces_a=coarse_boundary_faces[contact.part_a],
+            boundary_faces_b=coarse_boundary_faces[contact.part_b],
         )
         
         # Use slave's (part_a) contact region bbox for refinement on BOTH parts
@@ -672,6 +699,18 @@ def mesh_parts_with_contact_refinement(
     # Combine meshes
     combined = combine_meshes(fine_meshes)
     
+    # Pre-compute boundary faces for all fine meshes (do once, reuse for all contacts)
+    if verbose:
+        print("  Pre-computing boundary faces for refined meshes...")
+    fine_boundary_faces = {}
+    fine_elems = {}  # Cache element lists to avoid recreating for each contact
+    for part_name, mesh in fine_meshes.items():
+        elems = [(i + 1, e) for i, e in enumerate(mesh.elements)]
+        fine_elems[part_name] = elems
+        fine_boundary_faces[part_name] = get_boundary_faces_dict(elems)
+        if verbose:
+            print(f"    {part_name}: {len(fine_boundary_faces[part_name])} boundary faces")
+    
     # Find contact surfaces on refined mesh
     contact_surfaces = {}
     
@@ -679,8 +718,8 @@ def mesh_parts_with_contact_refinement(
         mesh_a = fine_meshes[contact.part_a]
         mesh_b = fine_meshes[contact.part_b]
         
-        elems_a = [(i + 1, e) for i, e in enumerate(mesh_a.elements)]
-        elems_b = [(i + 1, e) for i, e in enumerate(mesh_b.elements)]
+        elems_a = fine_elems[contact.part_a]
+        elems_b = fine_elems[contact.part_b]
         
         # Use margin based on fine element size for contact detection
         fine_margin = config.element_size_fine * 1.1 + config.contact_gap
@@ -690,6 +729,8 @@ def mesh_parts_with_contact_refinement(
             elems_b, mesh_b.nodes,
             margin=fine_margin,
             verbose=verbose,
+            boundary_faces_a=fine_boundary_faces[contact.part_a],
+            boundary_faces_b=fine_boundary_faces[contact.part_b],
         )
         
         # Map to combined mesh element IDs
