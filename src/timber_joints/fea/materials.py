@@ -73,6 +73,12 @@ BEAM_HORIZONTAL_X = GrainOrientation(
     b_vector=(0.0, 1.0, 0.0),
 )
 
+GIRT_HORIZONTAL_Y = GrainOrientation(
+    name="GIRT_ORIENT",
+    a_vector=(0.0, 1.0, 0.0),  # Grain along Y (connects bents)
+    b_vector=(1.0, 0.0, 0.0),
+)
+
 POST_VERTICAL_Z = GrainOrientation(
     name="POST_ORIENT",
     a_vector=(0.0, 0.0, 1.0),  # Grain along Z (vertical)

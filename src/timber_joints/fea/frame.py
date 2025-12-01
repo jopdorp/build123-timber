@@ -25,6 +25,7 @@ from .assembly import (
 from .materials import (
     GrainOrientation,
     BEAM_HORIZONTAL_X,
+    GIRT_HORIZONTAL_Y,
     POST_VERTICAL_Z,
 )
 from .meshing import (
@@ -41,6 +42,7 @@ class MemberType(Enum):
     """Type of structural member based on orientation."""
     POST = auto()    # Vertical member (grain along Z)
     BEAM = auto()    # Horizontal member (grain along X)
+    GIRT = auto()    # Horizontal member (grain along Y) - connects bents
     BRACE = auto()   # Diagonal member
 
 
@@ -67,6 +69,8 @@ class FrameMember:
             return MemberType.POST
         elif dx > dy and dx > dz:
             return MemberType.BEAM
+        elif dy > dx and dy > dz:
+            return MemberType.GIRT  # Y-oriented horizontal member
         else:
             return MemberType.BRACE
     
@@ -75,6 +79,8 @@ class FrameMember:
         """Get grain orientation for FEA."""
         if self.member_type == MemberType.POST:
             return POST_VERTICAL_Z
+        elif self.member_type == MemberType.GIRT:
+            return GIRT_HORIZONTAL_Y
         else:
             return BEAM_HORIZONTAL_X
     
@@ -93,6 +99,10 @@ class FrameMember:
     @property
     def is_brace(self) -> bool:
         return self.member_type == MemberType.BRACE
+    
+    @property
+    def is_girt(self) -> bool:
+        return self.member_type == MemberType.GIRT
 
 
 @dataclass
@@ -330,6 +340,12 @@ class TimberFrame:
                         contacts.append((m2.name, m1.name))
                     elif m2.is_beam and m1.is_brace:
                         # beam is master, brace is slave
+                        contacts.append((m1.name, m2.name))
+                    elif m1.is_girt and m2.is_brace:
+                        # girt is master, brace is slave
+                        contacts.append((m2.name, m1.name))
+                    elif m2.is_girt and m1.is_brace:
+                        # girt is master, brace is slave
                         contacts.append((m1.name, m2.name))
                     else:
                         # Default: m1 is slave, m2 is master

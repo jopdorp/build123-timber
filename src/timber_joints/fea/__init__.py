@@ -55,6 +55,7 @@ from .materials import (
     CustomTimberMaterial,
     # Common orientations
     BEAM_HORIZONTAL_X,
+    GIRT_HORIZONTAL_Y,
     POST_VERTICAL_Z,
     BRACE_DIAGONAL,
     # MFront support
@@ -178,6 +179,7 @@ __all__ = [
     "PoplarViscoelastic",
     "CustomTimberMaterial",
     "BEAM_HORIZONTAL_X",
+    "GIRT_HORIZONTAL_Y",
     "POST_VERTICAL_Z",
     "BRACE_DIAGONAL",
     "MFrontCompiler",
