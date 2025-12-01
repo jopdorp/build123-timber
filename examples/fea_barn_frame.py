@@ -100,5 +100,7 @@ result = run_fea_analysis(
 )
 
 # %%
-# Visualize FEA results
-visualize_fea_results(result, output_dir, cad_shapes, scale=60.0)
+# Visualize FEA results with limit-based colormap
+# - Displacement limit: beam_length/300 (L/300)
+# - Stress limit: 24 MPa (C24 f_m_k)
+visualize_fea_results(result, output_dir, cad_shapes, scale=60.0, reference_length=config.beam_length)

@@ -377,6 +377,64 @@ def read_frd_nodes(frd_file: Path) -> Dict[int, tuple[float, float, float]]:
     return nodes
 
 
+def read_frd_stresses(frd_file: Path) -> Dict[int, tuple[float, float, float, float, float, float]]:
+    """Read stress results from CalculiX .frd file.
+    
+    Reads from the LAST STRESS block (final increment).
+    Returns nodal stresses as (SXX, SYY, SZZ, SXY, SYZ, SZX) in MPa.
+    
+    Note: In orthotropic materials with grain orientation:
+    - SXX is typically the longitudinal (grain) direction stress
+    - SYY, SZZ are perpendicular to grain stresses
+    """
+    frd_file = Path(frd_file)
+    
+    with open(frd_file, 'r') as f:
+        lines = f.readlines()
+    
+    # Find all STRESS blocks
+    stress_blocks = []
+    current_start = None
+    
+    for i, line in enumerate(lines):
+        if line.strip().startswith('-4  STRESS'):
+            current_start = i
+        elif line.strip().startswith('-3') and current_start is not None:
+            stress_blocks.append((current_start, i))
+            current_start = None
+    
+    if not stress_blocks:
+        return {}
+    
+    # Use last STRESS block
+    start, end = stress_blocks[-1]
+    
+    stresses = {}
+    for i in range(start + 1, end):
+        line = lines[i]
+        if line.startswith(' -1'):
+            try:
+                node_id = int(line[3:13])
+                sxx = float(line[13:25])
+                syy = float(line[25:37])
+                szz = float(line[37:49])
+                sxy = float(line[49:61])
+                syz = float(line[61:73])
+                szx = float(line[73:85])
+                stresses[node_id] = (sxx, syy, szz, sxy, syz, szx)
+            except (ValueError, IndexError):
+                continue
+    
+    return stresses
+
+
+def compute_von_mises(sxx: float, syy: float, szz: float, 
+                      sxy: float, syz: float, szx: float) -> float:
+    """Compute von Mises equivalent stress from stress tensor components."""
+    return np.sqrt(0.5 * ((sxx - syy)**2 + (syy - szz)**2 + (szz - sxx)**2 
+                         + 6 * (sxy**2 + syz**2 + szx**2)))
+
+
 @BackendRegistry.register
 class CalculiXBackend(BaseSolverBackend):
     """CalculiX FEA solver backend."""
@@ -654,6 +712,25 @@ class CalculiXBackend(BaseSolverBackend):
             if abs(uz) > abs(max_uz):
                 max_uz = uz
         
+        # Read stresses
+        stresses = read_frd_stresses(frd_file)
+        max_von_mises = 0.0
+        max_principal = 0.0
+        min_principal = 0.0
+        
+        if stresses:
+            for sxx, syy, szz, sxy, syz, szx in stresses.values():
+                vm = compute_von_mises(sxx, syy, szz, sxy, syz, szx)
+                if vm > max_von_mises:
+                    max_von_mises = vm
+                # Track max/min normal stress for timber checks
+                # (principal stresses would need eigenvalue calculation)
+                for s in (sxx, syy, szz):
+                    if s > max_principal:
+                        max_principal = s
+                    if s < min_principal:
+                        min_principal = s
+        
         return AnalysisResult(
             success=True,
             solver_type=SolverType.CALCULIX,
@@ -661,6 +738,8 @@ class CalculiXBackend(BaseSolverBackend):
             max_displacement_x=max_ux,
             max_displacement_y=max_uy,
             max_displacement_z=max_uz,
+            max_von_mises=max_von_mises,
+            max_stress=max_principal,  # Max tensile stress
             node_displacements=displacements,
             input_file=input_file,
             results_file=frd_file,

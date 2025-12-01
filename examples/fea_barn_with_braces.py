@@ -90,8 +90,8 @@ def left_girt_load_filter(nid, x, y, z, part, mesh):
             abs(x - left_girt_right_x) < 35.0)
 
 additional_loads = [
-    LoadBC("right_girt_load", right_girt_load_filter, dof=3, total_load=-1000.0),  # 100 kg down
-    LoadBC("left_girt_load", left_girt_load_filter, dof=1, total_load=500.0),      # 50kg sideways +X
+    LoadBC("right_girt_load", right_girt_load_filter, dof=3, total_load=-2000.0),  # 200 kg down
+    LoadBC("left_girt_load", left_girt_load_filter, dof=1, total_load=800.0),      # 80kg sideways +X
 ]
 
 print(f"Additional loads:")
@@ -129,6 +129,16 @@ if 'result' not in dir() or result is None:
     result = LoadedResult()
     print(f"Loaded result from file (success={result.success})")
 
-visualize_fea_results(result, output_dir, cad_shapes, scale=5.0)
+# Visualize with limit-based colormap
+# - Displacement limit: beam_length/300 (L/300 serviceability)
+# - Stress limit: 24 MPa (C24 softwood bending strength f_m_k)
+visualize_fea_results(
+    result, 
+    output_dir, 
+    cad_shapes, 
+    scale=5.0,
+    reference_length=config.beam_length,  # 5000mm -> L/300 = 16.7mm
+    stress_limit=24.0,  # C24 f_m_k
+)
 
 # %%

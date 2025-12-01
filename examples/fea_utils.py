@@ -12,7 +12,7 @@ from build123d import Location, Part
 from ocp_vscode import show
 
 from timber_joints.fea import (
-    TimberFrame, LoadBC, show_fea_results,
+    TimberFrame, LoadBC, show_fea_results, show_fea_results_colormap,
     get_boundary_faces, build_mesh_faces_compound,
 )
 
@@ -202,7 +202,43 @@ def run_fea_analysis(
                 limit = reference_length / 300  # L/300
                 status = "PASS ✓" if abs(result.fea_results.max_uz) < limit else "FAIL ✗"
                 print(f"  Limit (L/300): {limit:.2f} mm")
-                print(f"  Status: {status}")
+                print(f"  Serviceability: {status}")
+            
+            # Strength check (C24 softwood characteristic values)
+            print(f"\nStress Results:")
+            print(f"  Max von Mises: {result.fea_results.max_von_mises:.2f} MPa")
+            print(f"  Max tensile: {result.fea_results.max_stress:.2f} MPa")
+            
+            # C24 characteristic strengths (EN 338)
+            # Note: Design values would be lower (÷ γ_M ≈ 1.3)
+            strengths = {
+                "Bending (f_m_k)": 24.0,
+                "Tension ∥ grain (f_t_0_k)": 14.0,
+                "Tension ⊥ grain (f_t_90_k)": 0.5,  # Critical!
+                "Compression ∥ grain (f_c_0_k)": 21.0,
+                "Compression ⊥ grain (f_c_90_k)": 2.5,
+                "Shear (f_v_k)": 4.0,
+            }
+            
+            print(f"\nStrength Check (C24 characteristic values):")
+            max_stress = result.fea_results.max_von_mises
+            
+            # Simple check against von Mises (conservative for timber)
+            # A proper check would separate stress components by direction
+            any_fail = False
+            for name, limit in strengths.items():
+                # For tension ⊥ grain, this is the critical one
+                if "⊥" in name:
+                    # Can't check direction without grain info, flag if VM > limit
+                    if max_stress > limit:
+                        print(f"  ⚠ WARNING: Max stress ({max_stress:.1f} MPa) > {name} ({limit} MPa)")
+                        any_fail = True
+            
+            if max_stress > 24.0:
+                print(f"  ✗ FAIL: Max stress ({max_stress:.1f} MPa) > bending strength (24 MPa)")
+                any_fail = True
+            elif not any_fail:
+                print(f"  ✓ Max von Mises ({max_stress:.1f} MPa) < bending strength (24 MPa)")
         
         print("=" * 60)
     
@@ -214,21 +250,44 @@ def visualize_fea_results(
     output_dir: Path,
     original_shapes: List[Tuple[Part, str, str]],
     scale: float = 5.0,
+    use_colormap: bool = True,
+    reference_length: Optional[float] = None,
+    stress_limit: Optional[float] = None,
 ):
-    """Visualize FEA results with deformed shape.
+    """Visualize FEA results with deformed shape and colormaps.
     
     Args:
         result: AssemblyResult from frame.analyze()
         output_dir: Directory containing mesh.inp and analysis.frd
         original_shapes: List of (shape, name, color) tuples
         scale: Displacement scale factor for visualization
+        use_colormap: If True, use limit-based colormap (displacement + stress)
+                     If False, use simple red deformed mesh
+        reference_length: Reference length for L/300 displacement limit (mm)
+                         If None, auto-detected from geometry
+        stress_limit: Allowable stress (MPa). If None, uses 24 MPa (C24 f_m_k)
     """
     if result.success:
-        show_fea_results(
-            mesh_file=str(output_dir / "mesh.inp"),
-            frd_file=str(output_dir / "analysis.frd"),
-            scale=scale,
-            original_shapes=original_shapes,
-            deformed_color="red",
-            original_alpha=0.3,
-        )
+        if use_colormap:
+            show_fea_results_colormap(
+                mesh_file=str(output_dir / "mesh.inp"),
+                frd_file=str(output_dir / "analysis.frd"),
+                scale=scale,
+                original_shapes=original_shapes,
+                original_alpha=0.3,
+                show_displacement=True,
+                show_stress=True,
+                displacement_offset=(0, 0, 0),
+                stress_offset=(8000, 0, 0),
+                reference_length=reference_length,
+                stress_limit=stress_limit,
+            )
+        else:
+            show_fea_results(
+                mesh_file=str(output_dir / "mesh.inp"),
+                frd_file=str(output_dir / "analysis.frd"),
+                scale=scale,
+                original_shapes=original_shapes,
+                deformed_color="red",
+                original_alpha=0.3,
+            )

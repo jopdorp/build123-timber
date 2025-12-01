@@ -36,6 +36,8 @@ from .backends.calculix import (
     CalculiXInput,
     run_ccx,
     read_frd_displacements,
+    read_frd_stresses,
+    compute_von_mises,
 )
 from .solver import (
     ContactParameters,
@@ -140,6 +142,8 @@ class FEAResults:
     displacements: Dict[int, Tuple[float, float, float]]  # node_id -> (ux, uy, uz)
     success: bool
     frd_file: Optional[Path] = None
+    max_von_mises: float = 0.0  # Max von Mises stress (MPa)
+    max_stress: float = 0.0  # Max principal/normal stress (MPa)
     
     @property
     def max_deflection(self) -> float:
@@ -360,12 +364,29 @@ def analyze_assembly(
                     max_total = total
                 if abs(uz) > abs(max_uz):
                     max_uz = uz
+            
+            # Read stresses
+            max_von_mises = 0.0
+            max_stress = 0.0
+            stresses = read_frd_stresses(frd_file)
+            if stresses:
+                for sxx, syy, szz, sxy, syz, szx in stresses.values():
+                    vm = compute_von_mises(sxx, syy, szz, sxy, syz, szx)
+                    if vm > max_von_mises:
+                        max_von_mises = vm
+                    # Track max normal stress
+                    for s in (sxx, syy, szz):
+                        if s > max_stress:
+                            max_stress = s
+            
             fea_results = FEAResults(
                 max_displacement=max_total,
                 max_uz=max_uz,
                 displacements=displacements,
                 success=True,
                 frd_file=frd_file,
+                max_von_mises=max_von_mises,
+                max_stress=max_stress,
             )
         else:
             fea_results = FEAResults(
@@ -380,6 +401,7 @@ def analyze_assembly(
         print(f"\nResults:")
         print(f"  Max displacement: {fea_results.max_displacement:.4f} mm")
         print(f"  Max Z displacement: {fea_results.max_uz:.4f} mm")
+        print(f"  Max von Mises stress: {fea_results.max_von_mises:.2f} MPa")
     
     return AssemblyResult(
         fea_results=fea_results,

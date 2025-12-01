@@ -81,5 +81,7 @@ result = run_fea_analysis(
 )
 
 # %%
-# Visualize FEA results
-visualize_fea_results(result, output_dir, cad_shapes, scale=5.0)
+# Visualize FEA results with limit-based colormap
+# - Displacement limit: 5000/300 = 16.7mm (L/300)
+# - Stress limit: 24 MPa (C24 f_m_k)
+visualize_fea_results(result, output_dir, cad_shapes, scale=5.0, reference_length=5000.0)

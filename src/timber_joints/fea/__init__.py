@@ -140,6 +140,8 @@ from .visualization import (
     apply_displacements,
     build_deformed_mesh,
     show_fea_results,
+    show_fea_results_colormap,
+    value_to_rainbow_color,
 )
 
 # =============================================================================
@@ -150,6 +152,8 @@ from .backends.calculix import (
     run_ccx,
     read_frd_displacements,
     read_frd_nodes,
+    read_frd_stresses,
+    compute_von_mises,
 )
 
 from .assembly import (
@@ -233,6 +237,8 @@ __all__ = [
     "run_ccx",
     "read_frd_displacements",
     "read_frd_nodes",
+    "read_frd_stresses",
+    "compute_von_mises",
     # Visualization
     "read_mesh_elements",
     "get_outer_faces",
@@ -240,6 +246,8 @@ __all__ = [
     "apply_displacements",
     "build_deformed_mesh",
     "show_fea_results",
+    "show_fea_results_colormap",
+    "value_to_rainbow_color",
     # Assembly API
     "AssemblyConfig",
     "AssemblyResult",
