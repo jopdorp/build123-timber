@@ -12,6 +12,7 @@ from ocp_vscode import reset_show, show_object
 
 from timber_joints.alignment import build_complete_bent, BraceParams
 from timber_joints.fea import TimberFrame, LoadBC
+from timber_joints.fea.frame import MemberType
 
 from fea_utils import visualize_frame_with_mesh, run_fea_analysis, visualize_fea_results
 
@@ -33,11 +34,11 @@ braces = [b for b in [bent.brace_left, bent.brace_right] if b is not None]
 
 # Create FEA frame
 frame = TimberFrame()
-frame.add_member("left_post", left_post)
-frame.add_member("right_post", right_post)
-frame.add_member("beam", beam)
+frame.add_member("left_post", left_post, MemberType.POST)
+frame.add_member("right_post", right_post, MemberType.POST)
+frame.add_member("beam", beam, MemberType.BEAM)
 for i, brace in enumerate(braces):
-    frame.add_member(f"brace_{i}", brace)
+    frame.add_member(f"brace_{i}", brace, MemberType.BRACE)
 
 # %%
 # Visualize CAD, mesh, and contacts

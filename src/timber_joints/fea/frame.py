@@ -89,6 +89,10 @@ class FrameMember:
     @property
     def is_beam(self) -> bool:
         return self.member_type == MemberType.BEAM
+    
+    @property
+    def is_brace(self) -> bool:
+        return self.member_type == MemberType.BRACE
 
 
 @dataclass
@@ -312,12 +316,23 @@ class TimberFrame:
         for i, m1 in enumerate(self.members):
             for m2 in self.members[i+1:]:
                 if self._bboxes_overlap(m1.bbox, m2.bbox, margin):
-                    # Beam is typically the slave surface (part_a)
-                    if m1.is_beam and m2.is_post:
-                        contacts.append((m1.name, m2.name))
-                    elif m2.is_beam and m1.is_post:
+                    # Slave surface (part_a) = tenon side (beam or brace)
+                    # Master surface (part_b) = mortise side (post or beam)
+                    # Priority: POST > BEAM > BRACE (posts are always master)
+                    if m1.is_post and not m2.is_post:
+                        # m1 is post (master), m2 is beam/brace (slave)
                         contacts.append((m2.name, m1.name))
+                    elif m2.is_post and not m1.is_post:
+                        # m2 is post (master), m1 is beam/brace (slave)
+                        contacts.append((m1.name, m2.name))
+                    elif m1.is_beam and m2.is_brace:
+                        # beam is master, brace is slave
+                        contacts.append((m2.name, m1.name))
+                    elif m2.is_beam and m1.is_brace:
+                        # beam is master, brace is slave
+                        contacts.append((m1.name, m2.name))
                     else:
+                        # Default: m1 is slave, m2 is master
                         contacts.append((m1.name, m2.name))
         
         return contacts
