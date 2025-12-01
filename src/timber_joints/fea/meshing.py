@@ -322,8 +322,14 @@ def write_mesh_inp(
 # Mesh Visualization and Contact Detection
 # =============================================================================
 
-# C3D4 face node indices (which 3 nodes form each of the 4 faces of a tetrahedron)
-C3D4_FACE_NODE_INDICES = [(0, 1, 2), (0, 1, 3), (1, 2, 3), (0, 2, 3)]
+# C3D4 face node indices for OUTWARD-pointing normals
+# Each face is defined by 3 node indices (0-based), ordered so the cross product
+# of (n2-n1) x (n3-n1) points OUTWARD from the tetrahedron (away from centroid)
+# S1: face opposite node 4 (nodes 1,3,2 in 1-based = indices 0,2,1)
+# S2: face opposite node 3 (nodes 1,2,4 in 1-based = indices 0,1,3)  
+# S3: face opposite node 1 (nodes 2,3,4 in 1-based = indices 1,2,3)
+# S4: face opposite node 2 (nodes 1,4,3 in 1-based = indices 0,3,2)
+C3D4_FACE_NODE_INDICES = [(0, 2, 1), (0, 1, 3), (1, 2, 3), (0, 3, 2)]
 
 
 def build_mesh_faces_compound(
