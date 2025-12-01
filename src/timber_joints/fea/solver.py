@@ -81,14 +81,15 @@ class ContactPair:
 class ContactParameters:
     """Parameters for frictional contact.
     
-    For timber joints with small gaps, use lower penalty values
-    to help convergence. CalculiX will adjust automatically.
+    For timber joints with well-meshed contact regions, higher penalty
+    values give faster convergence (stiffer contact). The stick_slope 
+    should be proportional to normal_penalty.
     """
     friction_coeff: float = 0.35
-    normal_penalty: float = 10.0     # MPa/mm - lower for better convergence with complex contacts
-    stick_slope: float = 10.0        # Match normal_penalty
-    stabilize: float = 0.01          # Increased stabilization for complex contacts
-    adjust: float = 1.0              # mm - larger adjustment distance for initial penetration
+    normal_penalty: float = 100.0    # MPa/mm - higher penalty for faster convergence
+    stick_slope: float = 100.0       # Match normal_penalty
+    stabilize: float = 0.01          # Stabilization for complex contacts
+    adjust: float = 1.0              # mm - adjustment distance for initial penetration
 
 
 # Node filter function signature
@@ -148,14 +149,15 @@ class MeshConfig:
 class StepConfig:
     """Analysis step configuration.
     
-    For contact problems, use smaller initial_increment (0.01-0.05) to help
-    convergence. The solver will automatically adjust step size.
+    For contact problems with well-refined meshes at contact regions,
+    larger increments can work. The solver will automatically cut back
+    if needed.
     """
-    initial_increment: float = 0.05  # Start with 1% of load for difficult contact problems
+    initial_increment: float = 0.1   # Start with 10% of load (larger since mesh is good)
     total_time: float = 1.0
-    min_increment: float = 1e-8      # Allow very small steps for difficult convergence
-    max_increment: float = 0.1       # Conservative max jump for contact
-    max_increments: int = 500        # Allow many iterations for contact
+    min_increment: float = 0.005     # 0.5% min - if smaller needed, won't converge anyway
+    max_increment: float = 0.2       # Allow larger steps (up from 0.1)
+    max_increments: int = 200        # Fewer iterations needed with better convergence
     nonlinear_geometry: bool = True
 
 

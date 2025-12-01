@@ -158,10 +158,17 @@ class CalculiXInput:
         return self
     
     def add_contact_controls(self) -> "CalculiXInput":
-        """Add contact convergence controls."""
+        """Add contact convergence controls.
+        
+        Parameters: delcon, alea, kscalemax, itf2f
+        - delcon: relative penetration reduction target (0.005 = 0.5%)
+        - alea: random perturbation for contact detection (0.1)
+        - kscalemax: max penalty scaling factor (50 - lower for stability)
+        - itf2f: face-to-face iterations (100 - fewer needed with good mesh)
+        """
         self.lines.extend([
             "*CONTROLS, PARAMETERS=CONTACT",
-            "0.005, 0.15, 75, 150",
+            "0.005, 0.1, 50, 100",
         ])
         return self
     
