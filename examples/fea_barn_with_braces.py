@@ -97,8 +97,8 @@ def left_girt_load_filter(nid, x, y, z, part, mesh):
             abs(x - left_girt_right_x) < 35.0)
 
 additional_loads = [
-    LoadBC("right_girt_load", right_girt_load_filter, dof=3, total_load=-2000.0),  # 200 kg down
-    LoadBC("left_girt_load", left_girt_load_filter, dof=1, total_load=800.0),      # 80kg sideways +X
+    LoadBC("right_girt_load", right_girt_load_filter, dof=3, total_load=-1000.0),  # 100 kg down
+    LoadBC("left_girt_load", left_girt_load_filter, dof=1, total_load=500.0),      # 50 kg sideways +X
 ]
 
 print(f"Additional loads:")
