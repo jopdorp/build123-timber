@@ -610,7 +610,7 @@ def export_fea_combined_gltf(
     coords = list(nodes.values())
     center_x = (max(c[0] for c in coords) + min(c[0] for c in coords)) / 2
     
-    def build_mesh_with_offset(node_coords, node_values, limit_or_limits, x_offset, default_color=None):
+    def build_mesh_with_offset(node_coords, node_values, limit_or_limits, x_offset, default_color=None, alpha=255):
         """Build a trimesh with given nodes, colors, and X offset.
         
         Args:
@@ -619,6 +619,7 @@ def export_fea_combined_gltf(
             limit_or_limits: float (single limit) or Dict[int, float] (per-node limits)
             x_offset: X offset for positioning
             default_color: If set, use this color for all vertices
+            alpha: Alpha value for transparency (0-255, default 255 = opaque)
         """
         # Handle both single limit and per-node limits
         use_per_node_limits = isinstance(limit_or_limits, dict)
@@ -650,7 +651,7 @@ def export_fea_combined_gltf(
                         else:
                             limit = single_limit
                         hex_color = value_to_limit_color(value, limit)
-                        rgba = hex_to_rgba_int(hex_color, alpha=255)
+                        rgba = hex_to_rgba_int(hex_color, alpha=alpha)
                     
                     vertex_idx = len(vertices)
                     node_to_vertex[nid] = vertex_idx
@@ -668,12 +669,21 @@ def export_fea_combined_gltf(
         faces_np = np.array(faces, dtype=np.int64)
         colors_np = np.array(colors, dtype=np.uint8)
         
-        return trimesh.Trimesh(
+        mesh = trimesh.Trimesh(
             vertices=vertices_np,
             faces=faces_np,
             vertex_colors=colors_np,
             process=False,
         )
+        
+        # For transparency, we need to set the material's alphaMode
+        # while keeping vertex colors. We do this by accessing the visual's material.
+        if alpha < 255 and hasattr(mesh.visual, 'material'):
+            # The vertex colors are already set, just update material for transparency
+            if mesh.visual.material is not None:
+                mesh.visual.material.alphaMode = 'BLEND'
+        
+        return mesh
     
     # Build three meshes side by side
     original_mesh = build_mesh_with_offset(
@@ -685,9 +695,10 @@ def export_fea_combined_gltf(
         deformed_nodes, disp_values, displacement_limit, 0.0
     )
     
-    # Use per-node stress limits for stress visualization
+    # Use per-node stress limits for stress visualization (semi-transparent)
     stress_mesh = build_mesh_with_offset(
-        deformed_nodes, stress_values, node_stress_limits, spacing
+        deformed_nodes, stress_values, node_stress_limits, spacing,
+        alpha=180  # Semi-transparent
     )
     
     # Combine into a scene
@@ -746,9 +757,52 @@ def export_fea_combined_gltf(
                 arrow_stress.apply_translation([spacing, 0, 0])
                 scene.add_geometry(arrow_stress, node_name=f"load_stress_{i}")
     
-    # Export
+    # Export to GLTF, then post-process to add transparency material
     output_path = Path(output_file)
-    scene.export(str(output_path), file_type='gltf')
+    gltf_data = scene.export(file_type='gltf')
+    
+    # Post-process GLTF to add material with alphaMode for transparency
+    # gltf_data is a dict with buffer files and 'model.gltf'
+    if isinstance(gltf_data, dict) and 'model.gltf' in gltf_data:
+        import json as json_module
+        gltf_json = json_module.loads(gltf_data['model.gltf'])
+        
+        # Add a transparent material
+        if 'materials' not in gltf_json:
+            gltf_json['materials'] = []
+        
+        # Add material for stress mesh (transparent)
+        stress_material_idx = len(gltf_json['materials'])
+        gltf_json['materials'].append({
+            "name": "stress_transparent",
+            "pbrMetallicRoughness": {
+                "baseColorFactor": [1.0, 1.0, 1.0, 0.8],
+                "metallicFactor": 0.0,
+                "roughnessFactor": 0.8
+            },
+            "alphaMode": "BLEND"
+        })
+        
+        # The stress mesh is the 3rd geometry added (index 2: original=0, displacement=1, stress=2)
+        # Assign the transparent material to its primitives
+        if 'meshes' in gltf_json and len(gltf_json['meshes']) > 2:
+            stress_mesh = gltf_json['meshes'][2]
+            for primitive in stress_mesh.get('primitives', []):
+                primitive['material'] = stress_material_idx
+        
+        # Write the modified GLTF
+        gltf_data['model.gltf'] = json_module.dumps(gltf_json).encode()
+        
+        # Save all files
+        for filename, content in gltf_data.items():
+            filepath = output_path.parent / filename
+            if filename == 'model.gltf':
+                filepath = output_path
+            with open(filepath, 'wb') as f:
+                f.write(content if isinstance(content, bytes) else content.encode())
+    else:
+        # Fallback: just save directly
+        scene.export(str(output_path), file_type='gltf')
     
     disp_ratio = max_disp / displacement_limit if displacement_limit > 0 else 0
     
