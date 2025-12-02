@@ -878,13 +878,23 @@ def build_rafter_pair(
     y_position: float,
     rafter_params: RafterParams,
 ) -> RafterPair:
+    # Full building width (outer edge to outer edge of girts)
     building_width = right_girt.bounding_box().max.X - left_girt.bounding_box().min.X
+    half_building_width = building_width / 2
+    # Center X position between girts
+    building_center_x = (left_girt.bounding_box().min.X + right_girt.bounding_box().max.X) / 2
     building_height = left_girt.bounding_box().max.Z
     tenon_length = rafter_params.section * 2 * math.tan(math.radians(rafter_params.pitch_angle))
-    girt_width = left_girt.bounding_box().max.X - left_girt.bounding_box().min.X
-    lap_length = rafter_params.overhang + girt_width / math.cos(math.radians(rafter_params.pitch_angle))
-    half_building_width = building_width / 2
-    rafter_length = half_building_width / math.cos(math.radians(rafter_params.pitch_angle)) + RafterParams.overhang + rafter_params.section / 2 / math.cos(math.radians(rafter_params.pitch_angle))
+    # Girt section is the X extent (width of the timber cross-section)
+    girt_section = left_girt.bounding_box().max.X - left_girt.bounding_box().min.X
+    # Top surface offset along the rafter due to pitch angle
+    top_surface_offset = rafter_params.section * math.tan(math.radians(rafter_params.pitch_angle))
+    # Lap length: from overhang tip to inner edge of girt (where rafter top surface meets girt inner edge)
+    lap_length = rafter_params.overhang + girt_section / math.cos(math.radians(rafter_params.pitch_angle)) + top_surface_offset
+    # Rafter length: from overhang tip to peak, plus extra for the peak joint overlap
+    # The rafter needs to extend past center by section/cos(angle) for the tongue-and-fork joint
+    peak_extension = rafter_params.section / math.cos(math.radians(rafter_params.pitch_angle))
+    rafter_length = half_building_width / math.cos(math.radians(rafter_params.pitch_angle)) + rafter_params.overhang + top_surface_offset + peak_extension
     
     left_rafter_beam = Beam(
         length=rafter_length,
@@ -973,11 +983,16 @@ def build_rafter_pair(
     left_after_trimmed = left_rafter_rotated - right_trimbox
 
     rafter_pair = [left_after_trimmed, right_rafter_trimmed]
-    rafter_pair_width = Compound(rafter_pair).bounding_box().max.X - Compound(rafter_pair).bounding_box().min.X
+    rafter_pair_bbox = Compound(rafter_pair).bounding_box()
+    # Center using the midpoint of the bounding box
+    rafter_pair_center_x = (rafter_pair_bbox.min.X + rafter_pair_bbox.max.X) / 2
+    
+    # Z position: rafter top face aligns with girt top
+    girt_top = left_girt.bounding_box().max.Z
 
     moved_rafter_pair = [
         rafter.move(Location((
-            -rafter_pair_width / 2 + girt_width / 2 - rafter_params.section / 2 * math.sin(math.radians(rafter_params.pitch_angle)),
+            building_center_x - rafter_pair_center_x,
             y_position,
             building_height - lap_length * math.sin(math.radians(rafter_params.pitch_angle)) - rafter_params.section / 2 * math.cos(math.radians(rafter_params.pitch_angle)),
         ))) for rafter in rafter_pair
