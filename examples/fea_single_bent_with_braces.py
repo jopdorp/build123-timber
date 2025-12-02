@@ -14,39 +14,19 @@ from timber_joints.alignment import JointParams, build_complete_bent, BraceParam
 from timber_joints.fea import (
     TimberFrame, 
     LoadBC, 
-    export_fea_combined_gltf, 
-    CustomTimberMaterial,
-    ElasticConstants,
-    StrengthProperties,
+    SoftwoodC16,
 )
 from timber_joints.fea.frame import MemberType
 
-from fea_utils import visualize_frame_with_mesh, run_fea_analysis
-
-# Define C16 softwood material for posts (weaker than C24)
-C16_SOFTWOOD = CustomTimberMaterial(
-    _name="C16_Softwood",
-    _elastic=ElasticConstants(
-        E_L=8000.0,    # Lower modulus than C24
-        E_R=270.0,
-        E_T=270.0,
-        G_LR=500.0,
-        G_LT=500.0,
-        G_RT=50.0,
-        nu_LR=0.37,
-        nu_LT=0.42,
-        nu_RT=0.47,
-    ),
-    _density=310.0,
-    _strength=StrengthProperties(
-        f_m_k=16.0,    # Lower bending strength (16 MPa vs 24 MPa)
-        f_t_0_k=10.0,
-        f_t_90_k=0.3,
-        f_c_0_k=17.0,
-        f_c_90_k=2.2,
-        f_v_k=3.2,
-    ),
+from fea_utils import (
+    visualize_frame_with_mesh, 
+    run_fea_analysis,
+    print_load_summary,
+    export_results_gltf,
 )
+
+# Use standard C16 softwood material for posts (weaker than C24)
+C16_SOFTWOOD = SoftwoodC16()
 
 reset_show()
 
@@ -117,10 +97,9 @@ main_load = LoadBC("main_load", main_load_filter, dof=3, total_load=-20000.0)  #
 
 output_dir = Path(__file__).parent / "fea_single_bent_braced_output"
 
-print("Loads:")
-print("  - Main load: 2000 kg (2 tonne) at beam midspan")
-print("  - Self-weight: automatic")
-print()
+print_load_summary([
+    {"name": "Main load", "magnitude_kg": 2000, "direction": "down", "location": "beam midspan"},
+])
 
 result = run_fea_analysis(
     frame,
@@ -132,12 +111,7 @@ result = run_fea_analysis(
 
 # Export FEA results to GLTF with limit-based colormap
 # - Displacement limit: 5000/300 = 16.7mm (L/300)
-# - Stress limit: 24 MPa (C24 f_m_k)
-if result.success:
-    export_fea_combined_gltf(
-        output_dir=output_dir,
-        scale=1.0,
-        reference_length=5000.0,
-    )
+# - Stress limit: per-part material limits
+export_results_gltf(result, output_dir, reference_length=5000.0, scale=1.0)
 
 # %%

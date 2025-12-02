@@ -49,6 +49,7 @@ from .materials import (
     ElasticConstants,
     StrengthProperties,
     # Predefined materials
+    SoftwoodC16,
     SoftwoodC24,
     HardwoodD30,
     PoplarViscoelastic,
@@ -179,6 +180,7 @@ __all__ = [
     "GrainOrientation",
     "ElasticConstants",
     "StrengthProperties",
+    "SoftwoodC16",
     "SoftwoodC24",
     "HardwoodD30",
     "PoplarViscoelastic",

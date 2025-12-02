@@ -3,10 +3,14 @@
 This module provides common functionality for:
 - Visualizing CAD geometry, mesh, and contact surfaces
 - Running and displaying FEA analysis results
+- Common material definitions
+
+Materials are defined in timber_joints.fea.materials - import from there:
+    from timber_joints.fea import SoftwoodC16, SoftwoodC24
 """
 
 from pathlib import Path
-from typing import List, Tuple, Optional, Callable
+from typing import List, Tuple, Optional, Callable, Dict
 
 from build123d import Location, Part
 from ocp_vscode import show
@@ -14,6 +18,7 @@ from ocp_vscode import show
 from timber_joints.fea import (
     TimberFrame, LoadBC,
     get_boundary_faces, build_mesh_faces_compound,
+    export_fea_combined_gltf,
 )
 
 
@@ -240,3 +245,76 @@ def run_fea_analysis(
         print("=" * 60)
     
     return result
+
+
+def print_load_summary(
+    loads: List[Dict[str, any]],
+    include_self_weight: bool = True,
+):
+    """Print a formatted summary of applied loads.
+    
+    Args:
+        loads: List of dicts with 'name', 'magnitude_kg', 'direction', optional 'location'
+        include_self_weight: Whether to print self-weight as automatic
+        
+    Example:
+        print_load_summary([
+            {"name": "Main load", "magnitude_kg": 5000, "direction": "down", "location": "beam midspan"},
+            {"name": "Side load", "magnitude_kg": 80, "direction": "+X", "location": "left girt"},
+        ])
+    """
+    print("Loads:")
+    for load in loads:
+        name = load.get("name", "Load")
+        mag = load.get("magnitude_kg", 0)
+        direction = load.get("direction", "")
+        location = load.get("location", "")
+        
+        parts = [f"  - {name}: {mag} kg"]
+        if direction:
+            parts.append(f"({direction})")
+        if location:
+            parts.append(f"at {location}")
+        print(" ".join(parts))
+    
+    if include_self_weight:
+        print("  - Self-weight: automatic")
+    print()
+
+
+def export_results_gltf(
+    result,
+    output_dir: Path,
+    reference_length: float,
+    scale: float = 1.0,
+    stress_limit: Optional[float] = None,
+    verbose: bool = True,
+):
+    """Export FEA results to GLTF if analysis was successful.
+    
+    Uses limit-based colormap:
+    - Displacement limit: reference_length/300 (L/300)
+    - Stress limit: from material or default 24 MPa (C24 f_m_k)
+    
+    Args:
+        result: AssemblyResult from frame.analyze()
+        output_dir: Directory containing analysis files
+        reference_length: Reference length for L/300 check (e.g., beam span)
+        scale: Displacement scale factor for visualization
+        stress_limit: Maximum stress for colormap (default: from per-part materials)
+        verbose: Print export message
+    """
+    if not result.success:
+        if verbose:
+            print("Analysis failed, skipping GLTF export")
+        return
+    
+    if verbose:
+        print(f"\nExporting results to GLTF (scale={scale}, ref_length={reference_length}mm)")
+    
+    export_fea_combined_gltf(
+        output_dir=output_dir,
+        scale=scale,
+        reference_length=reference_length,
+        stress_limit=stress_limit,
+    )

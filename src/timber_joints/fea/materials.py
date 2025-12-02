@@ -204,6 +204,48 @@ class TimberMaterial(ABC):
 
 
 @dataclass
+class SoftwoodC16(TimberMaterial):
+    """C16 structural softwood (EN 338).
+    
+    Lower grade structural timber, commonly used for non-primary elements.
+    Properties represent typical spruce/pine/fir.
+    """
+    
+    @property
+    def name(self) -> str:
+        return "C16_Softwood"
+    
+    @property
+    def elastic(self) -> ElasticConstants:
+        return ElasticConstants(
+            E_L=8000.0,    # Along grain (lower than C24)
+            E_R=270.0,     # Radial (scaled proportionally)
+            E_T=270.0,     # Tangential
+            G_LR=500.0,
+            G_LT=500.0,
+            G_RT=50.0,
+            nu_LR=0.37,
+            nu_LT=0.42,
+            nu_RT=0.47,
+        )
+    
+    @property
+    def density(self) -> float:
+        return 310.0  # kg/m³ (characteristic)
+    
+    @property
+    def strength(self) -> StrengthProperties:
+        return StrengthProperties(
+            f_m_k=16.0,
+            f_t_0_k=10.0,
+            f_t_90_k=0.4,
+            f_c_0_k=17.0,
+            f_c_90_k=2.2,
+            f_v_k=3.2,
+        )
+
+
+@dataclass
 class SoftwoodC24(TimberMaterial):
     """C24 structural softwood (EN 338).
     
@@ -557,6 +599,7 @@ class MaterialRegistry:
 
 
 # Register default materials
+MaterialRegistry.register(SoftwoodC16)
 MaterialRegistry.register(SoftwoodC24)
 MaterialRegistry.register(HardwoodD30)
 MaterialRegistry.register(PoplarViscoelastic)
