@@ -342,7 +342,16 @@ def analyze_assembly(
     ccx.add_include("mesh.inp")
     ccx.add_blank()
     
+    # Add all unique materials used by parts
+    added_materials = set()
+    # Always add default material first
     ccx.add_material(config.material)
+    added_materials.add(config.material.name)
+    # Add any part-specific materials
+    for part in parts:
+        if part.material and part.material.name not in added_materials:
+            ccx.add_material(part.material)
+            added_materials.add(part.material.name)
     ccx.add_blank()
     
     # Add orientations and sections for each part

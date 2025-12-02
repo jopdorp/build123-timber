@@ -200,8 +200,8 @@ def read_mesh_element_sets(mesh_file: str) -> Dict[str, List[int]]:
             if line.startswith('*ELSET'):
                 # Save previous set if any
                 if current_elset and current_elset not in skip_sets:
-                    # Convert element set name back to part name (lowercase, underscores to spaces)
-                    part_name = current_elset.lower().replace('_', ' ')
+                    # Convert element set name back to part name (lowercase)
+                    part_name = current_elset.lower()
                     element_sets[part_name] = current_elements
                 
                 # Parse new elset name
@@ -223,7 +223,7 @@ def read_mesh_element_sets(mesh_file: str) -> Dict[str, List[int]]:
         
         # Save last set
         if current_elset and current_elset not in skip_sets and current_elements:
-            part_name = current_elset.lower().replace('_', ' ')
+            part_name = current_elset.lower()
             element_sets[part_name] = current_elements
     
     return element_sets
@@ -600,6 +600,23 @@ def export_fea_combined_gltf(
             max_stress_ratio = ratio
             max_stress_part = node_to_part.get(nid, "unknown")
     
+    # Calculate per-part max stress and ratio
+    part_stress_results = {}
+    for nid, stress_val in stress_values.items():
+        part_name = node_to_part.get(nid)
+        if part_name:
+            limit = node_stress_limits.get(nid, fallback_stress_limit)
+            if part_name not in part_stress_results:
+                part_stress_results[part_name] = {
+                    "max_stress": stress_val,
+                    "limit": limit,
+                    "ratio": stress_val / limit if limit > 0 else 0,
+                }
+            else:
+                if stress_val > part_stress_results[part_name]["max_stress"]:
+                    part_stress_results[part_name]["max_stress"] = stress_val
+                    part_stress_results[part_name]["ratio"] = stress_val / limit if limit > 0 else 0
+
     # Build deformed coordinates
     deformed_nodes = apply_displacements(nodes, displacements, scale)
     
@@ -817,15 +834,29 @@ def export_fea_combined_gltf(
     print(f"\nLimits:")
     print(f"  Displacement: {displacement_limit:.4f} mm (L/300)")
     
+    # Show per-part stress results
+    if part_stress_results:
+        print(f"\nPer-Member Stress Check:")
+        all_passed = True
+        for part_name in sorted(part_stress_results.keys()):
+            result = part_stress_results[part_name]
+            max_s = result["max_stress"]
+            limit = result["limit"]
+            ratio = result["ratio"]
+            passed = ratio <= 1.0
+            status = "✓ PASS" if passed else "✗ FAIL"
+            if not passed:
+                all_passed = False
+            print(f"  {part_name}: {max_s:.2f} / {limit:.1f} MPa = {ratio*100:.1f}% {status}")
+        print(f"\n  Overall: {'✓ ALL PASS' if all_passed else '✗ SOME FAIL'}")
+    
     # Show per-part stress limits if we have material info
     if material_info:
-        print(f"  Stress limits (per-part from materials):")
+        print(f"\nMaterial Assignments:")
         for part_name, info in material_info.items():
             limit = info.get("stress_limit", fallback_stress_limit)
             mat_name = info.get("name", "unknown")
-            print(f"    {part_name}: {limit:.1f} MPa ({mat_name})")
-    else:
-        print(f"  Stress: {fallback_stress_limit:.1f} MPa (fallback)")
+            print(f"  {part_name}: {mat_name} (f_m_k = {limit:.1f} MPa)")
     
     if show_loads:
         output_dir = Path(mesh_file).parent
@@ -865,4 +896,5 @@ def export_fea_combined_gltf(
         "stress_ok": max_stress_ratio <= 1.0,
         "max_stress_part": max_stress_part,
         "material_info": material_info,
+        "part_stress_results": part_stress_results,  # Per-part stress info
     }

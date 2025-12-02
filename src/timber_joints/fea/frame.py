@@ -25,6 +25,7 @@ from .assembly import (
 )
 from .materials import (
     GrainOrientation,
+    TimberMaterial,
     BEAM_HORIZONTAL_X,
     GIRT_HORIZONTAL_Y,
     POST_VERTICAL_Z,
@@ -52,6 +53,7 @@ class FrameMember:
     name: str
     shape: Part
     member_type: MemberType = None  # Auto-detected if None
+    material: Optional[TimberMaterial] = None  # Uses frame default if None
     
     def __post_init__(self):
         if self.member_type is None:
@@ -127,9 +129,25 @@ class TimberFrame:
     # Physical constants
     GRAVITY: float = 9.81  # m/s²
     
-    def add_member(self, name: str, shape: Part, member_type: MemberType = None) -> "TimberFrame":
-        """Add a member to the frame. Returns self for chaining."""
-        self.members.append(FrameMember(name, shape, member_type))
+    def add_member(
+        self, 
+        name: str, 
+        shape: Part, 
+        member_type: MemberType = None,
+        material: Optional[TimberMaterial] = None,
+    ) -> "TimberFrame":
+        """Add a member to the frame.
+        
+        Args:
+            name: Member name for identification
+            shape: build123d Part geometry
+            member_type: Optional type (POST, BEAM, etc.), auto-detected if None
+            material: Optional material, uses frame default if None
+            
+        Returns:
+            self for method chaining
+        """
+        self.members.append(FrameMember(name, shape, member_type, material))
         return self
     
     @property
@@ -449,13 +467,13 @@ class TimberFrame:
         if output_dir is None:
             output_dir = Path("./fea_output")
         
-        # Build FEA parts
+        # Build FEA parts with per-member materials
         # Note: No shrinkage needed - the gap is built into the geometry
         # via create_receiving_cut margin parameter
         parts = []
         for member in self.members:
             shape = copy.deepcopy(member.shape)
-            parts.append(FEAPart(member.name, shape, member.orientation))
+            parts.append(FEAPart(member.name, shape, member.orientation, member.material))
         
         # Auto-detect contacts
         contact_pairs = []

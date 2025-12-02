@@ -4,17 +4,58 @@
 A bent is the basic unit of a timber frame:
 - 2 posts (vertical)
 - 1 beam (horizontal, connecting post tops)
+
+This example uses different materials for posts (weaker C16) and beam (C24)
+to demonstrate per-part material stress limits.
 """
 
 from pathlib import Path
 from ocp_vscode import reset_show, show_object
 
 from timber_joints.alignment import build_complete_bent
-from timber_joints.fea import TimberFrame, LoadBC, export_fea_combined_gltf
+from timber_joints.fea import (
+    TimberFrame, 
+    LoadBC, 
+    export_fea_combined_gltf,
+    CustomTimberMaterial,
+    ElasticConstants,
+    StrengthProperties,
+    SoftwoodC24,
+)
 
 from fea_utils import visualize_frame_with_mesh, run_fea_analysis
 
 reset_show()
+
+# %%
+# Define materials
+# C16 softwood (weaker grade) for posts
+C16_softwood = CustomTimberMaterial(
+    _name="C16_Softwood",
+    _elastic=ElasticConstants(
+        E_L=8000.0,    # Lower modulus than C24
+        E_R=270.0,
+        E_T=270.0,
+        G_LR=500.0,
+        G_LT=500.0,
+        G_RT=50.0,
+        nu_LR=0.37,
+        nu_LT=0.42,
+        nu_RT=0.47,
+    ),
+    _density=310.0,
+    _strength=StrengthProperties(
+        f_m_k=16.0,    # Lower bending strength (16 MPa vs 24 MPa)
+        f_t_0_k=10.0,
+        f_t_90_k=0.3,
+        f_c_0_k=17.0,
+        f_c_90_k=2.2,
+        f_v_k=3.2,
+    ),
+)
+
+# C24 softwood for beam (default)
+C24_softwood = SoftwoodC24()
 
 # %%
 # Build bent frame WITHOUT braces
@@ -29,11 +70,12 @@ left_post = bent.left_post
 right_post = bent.right_post
 beam = bent.beam
 
-# Create FEA frame
+# Create FEA frame with different materials
+# Posts use weaker C16 softwood, beam uses stronger C24
 frame = TimberFrame()
-frame.add_member("left_post", left_post)
-frame.add_member("right_post", right_post)
-frame.add_member("beam", beam)
+frame.add_member("left_post", left_post, material=C16_softwood)
+frame.add_member("right_post", right_post, material=C16_softwood)
+frame.add_member("beam", beam, material=C24_softwood)
 
 # %%
 # Visualize CAD, mesh, and contacts
