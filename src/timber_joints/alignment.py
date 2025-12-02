@@ -80,6 +80,41 @@ class GirtResult:
 
 
 @dataclass
+class RafterParams:
+    """Configuration for roof rafters."""
+    section: float = 100.0          # Rafter cross-section (square)
+    pitch_angle: float = 30.0       # Roof pitch in degrees
+    overhang: float = 200.0         # Eave overhang beyond girt
+    tongue_width_ratio: float = 1/3  # Tongue width as fraction of section
+    lap_depth_ratio: float = 0.5    # Lap joint depth as fraction of section
+    
+    def get_tongue_width(self) -> float:
+        """Get tongue width for peak joint."""
+        return self.section * self.tongue_width_ratio
+    
+    def get_lap_depth(self) -> float:
+        """Get lap joint depth for girt connection."""
+        return self.section * self.lap_depth_ratio
+
+
+@dataclass
+class RafterPair:
+    """A pair of rafters meeting at the ridge."""
+    left_rafter: Part   # Rafter on left side (negative X)
+    right_rafter: Part  # Rafter on right side (positive X)
+    left_girt: Part     # Left girt with lap cut
+    right_girt: Part    # Right girt with lap cut
+
+
+@dataclass
+class RafterResult:
+    """Result from adding rafters to a barn frame."""
+    rafter_pairs: List[RafterPair]  # One pair per bent
+    updated_left_girt: Part         # Left girt with all lap cuts
+    updated_right_girt: Part        # Right girt with all lap cuts
+
+
+@dataclass
 class PositionedBrace:
     """A brace with its positioning and cut receiving members.
     
@@ -829,4 +864,175 @@ def add_girts_to_bents(
         right_girt=right_girt,
         updated_bents=bents,  # Bents with tenons AND girt brace mortises cut
         braces=braces,
+    )
+
+from timber_joints.beam import Beam
+from timber_joints.shouldered_tenon import ShoulderedTenon
+from timber_joints.lap_joint import LapJoint
+from build123d import Part, Box, Vector, Location, Axis, Align, Compound
+from ocp_vscode import show_object
+
+def build_rafter_pair(
+    left_girt: Part,
+    right_girt: Part,
+    y_position: float,
+    rafter_params: RafterParams,
+) -> RafterPair:
+    building_width = right_girt.bounding_box().max.X - left_girt.bounding_box().min.X
+    building_height = left_girt.bounding_box().max.Z
+    tenon_length = rafter_params.section * 2 * math.tan(math.radians(rafter_params.pitch_angle))
+    girt_width = left_girt.bounding_box().max.X - left_girt.bounding_box().min.X
+    lap_length = rafter_params.overhang + girt_width / math.cos(math.radians(rafter_params.pitch_angle))
+    half_building_width = building_width / 2
+    rafter_length = half_building_width / math.cos(math.radians(rafter_params.pitch_angle)) + RafterParams.overhang + rafter_params.section / 2 / math.cos(math.radians(rafter_params.pitch_angle))
+    
+    left_rafter_beam = Beam(
+        length=rafter_length,
+        width=rafter_params.section,
+        height=rafter_params.section,
+    )
+
+    left_rafter_with_lap = LapJoint(
+        beam=left_rafter_beam.shape,
+        cut_length=lap_length,
+        cut_depth=rafter_params.section / 2,
+        from_top=False,
+        at_start=True,
+    ).shape
+
+    left_rafter_with_tenon = ShoulderedTenon(
+        beam=left_rafter_with_lap,
+        tenon_width=rafter_params.section / 3,
+        tenon_height=rafter_params.section,
+        tenon_length=tenon_length,
+        shoulder_depth=rafter_params.section * math.tan(math.radians(rafter_params.pitch_angle)),
+        at_start=False,
+    ).shape
+    
+    left_rafter_rotated = left_rafter_with_tenon.rotate(
+        Axis.Y,
+        -rafter_params.pitch_angle,
+    )
+
+    right_rafter_beam = Beam(
+        length=rafter_length,
+        width=rafter_params.section,
+        height=rafter_params.section,
+    )
+    
+    right_rafter_with_lap = LapJoint(
+        beam=right_rafter_beam.shape,
+        cut_length=lap_length,
+        cut_depth=rafter_params.section / 2,
+        from_top=False,
+        at_start=False,
+    ).shape.rotate(
+        Axis.Y,
+        rafter_params.pitch_angle,
+    ).move(Location((
+        rafter_length * math.cos(math.radians(rafter_params.pitch_angle)) - rafter_params.section * 2,
+        0,
+        rafter_length * math.sin(math.radians(rafter_params.pitch_angle)),
+    )))
+
+    right_rafter_with_mortise = create_receiving_cut(
+        positioned_insert=left_rafter_rotated,
+        receiving_shape=right_rafter_with_lap,
+    )
+
+    left_trimbox = Box(
+        height=rafter_params.section,
+        width=rafter_params.section,
+        length=rafter_length,
+        align=(Align.MIN, Align.MIN, Align.MIN),
+    )
+    left_trimbox = left_trimbox.rotate(
+        Axis.Y,
+        -rafter_params.pitch_angle,
+    ).move(Location((
+        0,
+        0,
+        rafter_params.section * math.tan(math.radians(rafter_params.pitch_angle)) * 2
+    )))
+    right_rafter_trimmed = right_rafter_with_mortise - left_trimbox
+
+    right_trimbox = Box(
+        height=rafter_params.section,
+        width=rafter_params.section,
+        length=rafter_length,
+        align=(Align.MIN, Align.MIN, Align.MIN),
+    )
+    right_trimbox = right_trimbox.rotate(
+        Axis.Y,
+        rafter_params.pitch_angle,
+    ).move(Location((
+        rafter_length * math.cos(math.radians(rafter_params.pitch_angle)) - rafter_params.section * 2,      
+        0,
+        rafter_length * math.sin(math.radians(rafter_params.pitch_angle)) + rafter_params.section * math.tan(math.radians(rafter_params.pitch_angle)) * 2,
+    )))
+    left_after_trimmed = left_rafter_rotated - right_trimbox
+
+    rafter_pair = [left_after_trimmed, right_rafter_trimmed]
+    rafter_pair_width = Compound(rafter_pair).bounding_box().max.X - Compound(rafter_pair).bounding_box().min.X
+
+    moved_rafter_pair = [
+        rafter.move(Location((
+            -rafter_pair_width / 2 + girt_width / 2 - rafter_params.section / 2 * math.sin(math.radians(rafter_params.pitch_angle)) + half_building_width,
+            y_position,
+            building_height - lap_length * math.sin(math.radians(rafter_params.pitch_angle)) - rafter_params.section / 2 * math.cos(math.radians(rafter_params.pitch_angle)),
+        ))) for rafter in rafter_pair
+    ]
+    left_rafter_positioned, right_rafter_positioned = moved_rafter_pair
+    
+    
+    return RafterPair(
+        left_rafter=left_rafter_positioned,
+        right_rafter=right_rafter_positioned,
+        left_girt=left_girt,
+        right_girt=right_girt,
+    )
+
+
+def add_rafters_to_barn(
+    left_girt: Part,
+    right_girt: Part,
+    y_positions: List[float],
+    rafter_params: RafterParams = None,
+) -> RafterResult:
+    """Add rafters to a barn frame at each bent position.
+    
+    Creates rafter pairs at each Y position, with tongue-and-fork joints
+    at the peak and lap joints at the girts.
+    
+    Args:
+        left_girt: Left girt (will be updated with lap cuts)
+        right_girt: Right girt (will be updated with lap cuts)
+        y_positions: Y positions for each rafter pair (typically bent positions)
+        rafter_params: Configuration for rafters (default: RafterParams())
+    
+    Returns:
+        RafterResult with all rafter pairs and updated girts
+    """
+    if rafter_params is None:
+        rafter_params = RafterParams()
+    
+    rafter_pairs = []
+    current_left_girt = left_girt
+    current_right_girt = right_girt
+    
+    for y_pos in y_positions:
+        pair = build_rafter_pair(
+            left_girt=current_left_girt,
+            right_girt=current_right_girt,
+            y_position=y_pos,
+            rafter_params=rafter_params,
+        )
+        rafter_pairs.append(pair)
+        current_left_girt = pair.left_girt
+        current_right_girt = pair.right_girt
+    
+    return RafterResult(
+        rafter_pairs=rafter_pairs,
+        updated_left_girt=current_left_girt,
+        updated_right_girt=current_right_girt,
     )

@@ -16,8 +16,11 @@ from timber_joints.alignment import (
     JointParams,
     BentResult,
     GirtResult,
+    RafterParams,
+    RafterResult,
     build_complete_bent,
     add_girts_to_bents,
+    add_rafters_to_barn,
 )
 
 
@@ -55,6 +58,11 @@ class BarnConfig:
     girt_brace_length: Optional[float] = None
     girt_brace_angle: Optional[float] = None
     
+    # Rafter parameters
+    rafter_section: float = 100.0       # Rafter cross-section
+    rafter_pitch: float = 30.0          # Roof pitch in degrees
+    rafter_overhang: float = 300.0      # Eave overhang beyond girt
+    
     # Legacy brace_section for backward compatibility
     brace_section: Optional[float] = None
     brace_length: Optional[float] = None
@@ -63,6 +71,7 @@ class BarnConfig:
     include_girts: bool = True
     include_bent_braces: bool = True
     include_girt_braces: bool = True
+    include_rafters: bool = False       # Rafters disabled by default
     
     def __post_init__(self):
         if self.girt_section is None:
@@ -117,6 +126,16 @@ class BarnConfig:
             length=self.girt_brace_length,
             angle=self.girt_brace_angle,
             tenon_length=self.tenon_length,
+        )
+    
+    def get_rafter_params(self) -> Optional[RafterParams]:
+        """Get RafterParams for rafters, or None if disabled."""
+        if not self.include_rafters:
+            return None
+        return RafterParams(
+            section=self.rafter_section,
+            pitch_angle=self.rafter_pitch,
+            overhang=self.rafter_overhang,
         )
 
 
@@ -173,21 +192,37 @@ class BarnFrame:
     config: BarnConfig
     bents: list[Bent] = field(default_factory=list)
     girt_result: Optional[GirtResult] = None
+    rafter_result: Optional[RafterResult] = None
     
     @property
     def left_girt(self) -> Optional[Part]:
         """Left girt, or None if not built."""
+        if self.rafter_result:
+            return self.rafter_result.updated_left_girt
         return self.girt_result.left_girt if self.girt_result else None
     
     @property
     def right_girt(self) -> Optional[Part]:
         """Right girt, or None if not built."""
+        if self.rafter_result:
+            return self.rafter_result.updated_right_girt
         return self.girt_result.right_girt if self.girt_result else None
     
     @property
     def girt_braces(self) -> list[tuple[str, Part]]:
         """List of (name, part) tuples for girt braces."""
         return self.girt_result.braces if self.girt_result else []
+    
+    @property
+    def rafters(self) -> list[tuple[str, Part]]:
+        """List of (name, part) tuples for rafters."""
+        if not self.rafter_result:
+            return []
+        result = []
+        for i, pair in enumerate(self.rafter_result.rafter_pairs):
+            result.append((f"rafter_left_{i+1}", pair.left_rafter))
+            result.append((f"rafter_right_{i+1}", pair.right_rafter))
+        return result
     
     @classmethod
     def build(cls, config: BarnConfig) -> "BarnFrame":
@@ -196,6 +231,8 @@ class BarnFrame:
         barn._build_bents()
         if config.include_girts:
             barn._build_girts()
+        if config.include_rafters and config.include_girts:
+            barn._build_rafters()
         return barn
     
     def _build_bents(self):
@@ -240,6 +277,27 @@ class BarnFrame:
         for i, updated_bent in enumerate(self.girt_result.updated_bents):
             self.bents[i] = Bent(result=updated_bent, y_position=y_positions[i])
     
+    def _build_rafters(self):
+        """Build rafters at each bent position using add_rafters_to_barn utility."""
+        if not self.girt_result:
+            raise ValueError("Girts must be built before rafters")
+        
+        config = self.config
+        rafter_params = config.get_rafter_params()
+        if rafter_params is None:
+            return
+        
+        # Get Y positions for rafter pairs (at each bent)
+        y_positions = [bent.y_position for bent in self.bents]
+        
+        # Build rafters
+        self.rafter_result = add_rafters_to_barn(
+            left_girt=self.girt_result.left_girt,
+            right_girt=self.girt_result.right_girt,
+            y_positions=y_positions,
+            rafter_params=rafter_params,
+        )
+    
     def all_parts(self) -> list[tuple[Part, str]]:
         parts = []
         
@@ -260,6 +318,9 @@ class BarnFrame:
         for name, brace in self.girt_braces:
             parts.append((brace, name))
         
+        for name, rafter in self.rafters:
+            parts.append((rafter, name))
+        
         return parts
     
     def show(self, show_object_func):
@@ -267,6 +328,8 @@ class BarnFrame:
         for part, name in self.all_parts():
             if "brace" in name.lower():
                 show_object_func(part, name=name, options={"color": "orange"})
+            elif "rafter" in name.lower():
+                show_object_func(part, name=name, options={"color": "peru", "alpha": 0.3})
             elif "girt" in name.lower():
                 show_object_func(part, name=name, options={"color": "burlywood", "alpha": 0.3})
             elif "beam" in name.lower():
@@ -291,6 +354,8 @@ class BarnFrame:
             lines.append(f"Bent braces: {config.bent_brace_section}mm section, {config.bent_brace_length:.1f}mm length, {config.bent_brace_angle}°")
         if config.girt_brace_section:
             lines.append(f"Girt braces: {config.girt_brace_section}mm section, {config.girt_brace_length:.1f}mm length, {config.girt_brace_angle}°")
+        if config.include_rafters:
+            lines.append(f"Rafters: {config.rafter_section}mm section, {config.rafter_pitch}° pitch, {config.rafter_overhang}mm overhang")
         
         # Count parts
         num_posts = len(self.bents) * 2
@@ -298,7 +363,8 @@ class BarnFrame:
         num_girts = 2 if self.left_girt else 0
         num_bent_braces = sum(1 for b in self.bents if b.brace_left) * 2
         num_girt_braces = len(self.girt_braces)
-        total = num_posts + num_beams + num_girts + num_bent_braces + num_girt_braces
+        num_rafters = len(self.rafters)
+        total = num_posts + num_beams + num_girts + num_bent_braces + num_girt_braces + num_rafters
         
         lines.extend([
             f"",
@@ -308,6 +374,7 @@ class BarnFrame:
             f"  - Girts: {num_girts}",
             f"  - Bent braces: {num_bent_braces}",
             f"  - Girt braces: {num_girt_braces}",
+            f"  - Rafters: {num_rafters}",
         ])
         
         return "\n".join(lines)
@@ -337,5 +404,9 @@ class BarnFrame:
         # Add girt braces
         for name, brace in self.girt_braces:
             frame.add_member(name, brace, MemberType.BRACE)
+        
+        # Add rafters
+        for name, rafter in self.rafters:
+            frame.add_member(name, rafter)
         
         return frame

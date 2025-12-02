@@ -25,9 +25,6 @@ from fea_utils import (
     export_results_gltf,
 )
 
-# Use standard C16 softwood material for posts (weaker than C24)
-C16_SOFTWOOD = SoftwoodC16()
-
 reset_show()
 
 # %%
@@ -56,8 +53,8 @@ braces = [b for b in [bent.brace_left, bent.brace_right] if b is not None]
 
 # Create FEA frame
 frame = TimberFrame()
-frame.add_member("left_post", left_post, MemberType.POST, material=C16_SOFTWOOD)
-frame.add_member("right_post", right_post, MemberType.POST, material=C16_SOFTWOOD)
+frame.add_member("left_post", left_post, MemberType.POST)
+frame.add_member("right_post", right_post, MemberType.POST)
 frame.add_member("beam", beam, MemberType.BEAM)  # Uses default C24
 for i, brace in enumerate(braces):
     frame.add_member(f"brace_{i}", brace, MemberType.BRACE)  # Uses default C24

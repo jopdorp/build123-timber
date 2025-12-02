@@ -1,11 +1,12 @@
 # %%
-"""FEA analysis of a 3-bent barn frame WITH braces.
+"""FEA analysis of a 3-bent barn frame WITH braces and rafters.
 
 A barn frame with full bracing consists of:
 - 3 bents (each with 2 posts + 1 cross beam) spaced along Y axis
 - 2 girts running longitudinally connecting post tops along Y
 - Knee braces per bent for lateral stability (bent braces)
 - Girt braces for longitudinal bracing
+- Rafters with tongue-and-fork joint at peak and lap joint at girts
 """
 
 from pathlib import Path
@@ -18,9 +19,10 @@ from fea_utils import visualize_frame_with_mesh, run_fea_analysis
 
 reset_show()
 
-# Build barn WITH braces
+# Build barn WITH braces and rafters
 # Bent braces: 30°, longer (1000mm brace length)
 # Girt braces: 45°, shorter (707mm brace length, ~500mm horizontal)
+# Rafters: 30° pitch, 100mm section, 300mm overhang
 config = BarnConfig(
     post_height=3000,
     post_section=150,
@@ -41,13 +43,18 @@ config = BarnConfig(
     girt_brace_section=100,
     girt_brace_length=707.1,  # 500 / cos(45°)
     girt_brace_angle=45.0,
+    # Rafters: 30° pitch
+    include_rafters=True,
+    rafter_section=100,
+    rafter_pitch=30,
+    rafter_overhang=300,
 )
 
 # %%
 barn = BarnFrame.build(config)
 
 # Show geometry summary
-print("Barn frame geometry with braces:")
+print("Barn frame geometry with braces and rafters:")
 print(barn.summary())
 
 # %%
@@ -107,7 +114,7 @@ output_dir = Path(__file__).parent / "fea_barn_braced_output"
 result = run_fea_analysis(
     frame,
     output_dir,
-    title="3-BENT BARN FRAME FEA ANALYSIS (WITH BRACES)",
+    title="3-BENT BARN FRAME FEA ANALYSIS (WITH BRACES AND RAFTERS)",
     additional_loads=additional_loads,
     reference_length=config.beam_length,
 )

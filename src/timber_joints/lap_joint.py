@@ -13,6 +13,7 @@ class LapJoint(BaseJoint):
     cut_depth: float
     cut_length: float
     from_top: bool = True
+    at_start: bool = False
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -24,7 +25,10 @@ class LapJoint(BaseJoint):
 
     @property
     def shape(self) -> Part:
-        x_pos = self._length - self.cut_length
+        if self.at_start:
+            x_pos = 0
+        else:
+            x_pos = self._length - self.cut_length
         
         cut = create_lap_cut(
             beam_width=self._width,
@@ -39,4 +43,5 @@ class LapJoint(BaseJoint):
 
     def __repr__(self) -> str:
         side = "top" if self.from_top else "bottom"
-        return f"LapJoint(beam={self.beam}, depth={self.cut_depth}, length={self.cut_length}, from_{side})"
+        position = "start" if self.at_start else "end"
+        return f"LapJoint(beam={self.beam}, depth={self.cut_depth}, length={self.cut_length}, from_{side}, at_{position})"
