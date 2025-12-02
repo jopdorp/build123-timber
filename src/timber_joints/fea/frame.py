@@ -369,6 +369,12 @@ class TimberFrame:
                     elif m2.is_girt and m1.is_brace:
                         # girt is master, brace is slave
                         contacts.append((m1.name, m2.name))
+                    elif m1.is_girt and m2.is_beam:
+                        # girt-rafter: girt is master (has mortise/lap), rafter is slave
+                        contacts.append((m2.name, m1.name))
+                    elif m2.is_girt and m1.is_beam:
+                        # girt-rafter: girt is master (has mortise/lap), rafter is slave
+                        contacts.append((m1.name, m2.name))
                     else:
                         # Default: m1 is slave, m2 is master
                         contacts.append((m1.name, m2.name))
@@ -496,9 +502,13 @@ class TimberFrame:
                 )
             ))
         
-        # Load BC: default to beam midspan top
-        if load_location is None:
+        # Load BC: default to beam midspan top (only if load != 0 and no custom location)
+        load_location_fn = None
+        if load != 0.0 and load_location is None:
             # Find the beam with largest span
+            if not self.beams:
+                raise ValueError("No beams in frame - cannot determine default load location. "
+                               "Either add a beam, provide load_location, or set load=0.")
             main_beam = max(self.beams, key=lambda m: m.bbox.max.X - m.bbox.min.X)
             beam_bbox = main_beam.bbox
             mid_x = (beam_bbox.min.X + beam_bbox.max.X) / 2
@@ -517,7 +527,7 @@ class TimberFrame:
                 return part == beam_name and abs(x - mid_x) < x_tol and abs(z - top_z) < z_tol
             
             load_location_fn = default_load_location
-        else:
+        elif load_location is not None:
             # Wrap user function to match signature
             def wrapped_load(nid, x, y, z, part, mesh):
                 return load_location(x, y, z)

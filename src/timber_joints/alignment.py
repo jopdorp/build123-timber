@@ -708,8 +708,6 @@ def add_girts_to_bents(
     from timber_joints.tenon import Tenon
     from timber_joints.utils import create_vertical_cut
     
-    if len(bents) < 2:
-        raise ValueError("Need at least 2 bents to add girts")
     if len(bents) != len(y_positions):
         raise ValueError("Number of bents must match number of y_positions")
     

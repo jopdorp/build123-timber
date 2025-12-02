@@ -292,26 +292,22 @@ class BarnFrame:
         if rafter_params is None:
             return
         
+        rafter_section = rafter_params.section
+        rafter_on_girt_centering = (config.girt_section - rafter_section) / 2
+        
         # Calculate Y positions for rafter pairs
         if config.num_rafters is not None:
             # Evenly distribute rafters along the girt length
             # Rafter center is at y_position, so offset by half section from each end
             girt_bbox = self.girt_result.left_girt.bounding_box()
-            rafter_section = rafter_params.section
-            girt_start_y = girt_bbox.min.Y
-            girt_end_y = girt_bbox.max.Y - rafter_section
-            usable_length = girt_end_y - girt_start_y
-            
-            if config.num_rafters == 1:
-                # Single rafter at center
-                y_positions = [(girt_start_y + girt_end_y) / 2]
-            else:
-                # Evenly spaced rafters
-                spacing = usable_length / (config.num_rafters - 1)
-                y_positions = [girt_start_y + i * spacing for i in range(config.num_rafters)]
+            girt_start_y = girt_bbox.min.Y + rafter_on_girt_centering
+            girt_end_y = girt_bbox.max.Y - rafter_section - rafter_on_girt_centering
+            usable_length = girt_end_y - girt_start_y  # Adjust for girt thickness
+            spacing = usable_length / (config.num_rafters - 1)
+            y_positions = [girt_start_y + i * spacing for i in range(config.num_rafters)]
         else:
             # Default: one rafter pair at each bent position
-            y_positions = [bent.y_position for bent in self.bents]
+            y_positions = [bent.y_position + rafter_on_girt_centering for bent in self.bents]
         
         # Build rafters
         self.rafter_result = add_rafters_to_barn(
