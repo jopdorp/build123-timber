@@ -11,10 +11,42 @@ from pathlib import Path
 from ocp_vscode import reset_show, show_object
 
 from timber_joints.alignment import JointParams, build_complete_bent, BraceParams
-from timber_joints.fea import TimberFrame, LoadBC, export_fea_combined_gltf
+from timber_joints.fea import (
+    TimberFrame, 
+    LoadBC, 
+    export_fea_combined_gltf, 
+    CustomTimberMaterial,
+    ElasticConstants,
+    StrengthProperties,
+)
 from timber_joints.fea.frame import MemberType
 
 from fea_utils import visualize_frame_with_mesh, run_fea_analysis
+
+# Define C16 softwood material for posts (weaker than C24)
+C16_SOFTWOOD = CustomTimberMaterial(
+    _name="C16_Softwood",
+    _elastic=ElasticConstants(
+        E_L=8000.0,    # Lower modulus than C24
+        E_R=270.0,
+        E_T=270.0,
+        G_LR=500.0,
+        G_LT=500.0,
+        G_RT=50.0,
+        nu_LR=0.37,
+        nu_LT=0.42,
+        nu_RT=0.47,
+    ),
+    _density=310.0,
+    _strength=StrengthProperties(
+        f_m_k=16.0,    # Lower bending strength (16 MPa vs 24 MPa)
+        f_t_0_k=10.0,
+        f_t_90_k=0.3,
+        f_c_0_k=17.0,
+        f_c_90_k=2.2,
+        f_v_k=3.2,
+    ),
+)
 
 reset_show()
 
@@ -44,11 +76,11 @@ braces = [b for b in [bent.brace_left, bent.brace_right] if b is not None]
 
 # Create FEA frame
 frame = TimberFrame()
-frame.add_member("left_post", left_post, MemberType.POST)
-frame.add_member("right_post", right_post, MemberType.POST)
-frame.add_member("beam", beam, MemberType.BEAM)
+frame.add_member("left_post", left_post, MemberType.POST, material=C16_SOFTWOOD)
+frame.add_member("right_post", right_post, MemberType.POST, material=C16_SOFTWOOD)
+frame.add_member("beam", beam, MemberType.BEAM)  # Uses default C24
 for i, brace in enumerate(braces):
-    frame.add_member(f"brace_{i}", brace, MemberType.BRACE)
+    frame.add_member(f"brace_{i}", brace, MemberType.BRACE)  # Uses default C24
 
 # %%
 # Visualize CAD, mesh, and contacts
