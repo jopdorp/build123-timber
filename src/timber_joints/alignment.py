@@ -977,7 +977,7 @@ def build_rafter_pair(
 
     moved_rafter_pair = [
         rafter.move(Location((
-            -rafter_pair_width / 2 + girt_width / 2 - rafter_params.section / 2 * math.sin(math.radians(rafter_params.pitch_angle)) + half_building_width,
+            -rafter_pair_width / 2 + girt_width / 2 - rafter_params.section / 2 * math.sin(math.radians(rafter_params.pitch_angle)),
             y_position,
             building_height - lap_length * math.sin(math.radians(rafter_params.pitch_angle)) - rafter_params.section / 2 * math.cos(math.radians(rafter_params.pitch_angle)),
         ))) for rafter in rafter_pair
