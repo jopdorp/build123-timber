@@ -12,7 +12,7 @@ from build123d import Location, Part
 from ocp_vscode import show
 
 from timber_joints.fea import (
-    TimberFrame, LoadBC, show_fea_results, show_fea_results_colormap,
+    TimberFrame, LoadBC,
     get_boundary_faces, build_mesh_faces_compound,
 )
 
@@ -240,60 +240,3 @@ def run_fea_analysis(
         print("=" * 60)
     
     return result
-
-
-def visualize_fea_results(
-    result,
-    output_dir: Path,
-    original_shapes: List[Tuple[Part, str, str]],
-    scale: float = 5.0,
-    use_colormap: bool = True,
-    reference_length: Optional[float] = None,
-    stress_limit: Optional[float] = None,
-    smooth_colors: bool = True,
-    subdivisions: int = 3,
-    stress_alpha: float = 0.7,
-):
-    """Visualize FEA results with deformed shape and colormaps.
-    
-    Args:
-        result: AssemblyResult from frame.analyze()
-        output_dir: Directory containing mesh.inp and analysis.frd
-        original_shapes: List of (shape, name, color) tuples
-        scale: Displacement scale factor for visualization
-        use_colormap: If True, use limit-based colormap (displacement + stress)
-                     If False, use simple red deformed mesh
-        reference_length: Reference length for L/300 displacement limit (mm)
-                         If None, auto-detected from geometry
-        stress_limit: Allowable stress (MPa). If None, uses 24 MPa (C24 f_m_k)
-        smooth_colors: Use subdivision for smoother color gradients (default True)
-        subdivisions: Number of subdivisions per triangle edge (higher = smoother)
-        stress_alpha: Transparency for stress visualization (0.7 = see inside joints)
-    """
-    if result.success:
-        if use_colormap:
-            show_fea_results_colormap(
-                mesh_file=str(output_dir / "mesh.inp"),
-                frd_file=str(output_dir / "analysis.frd"),
-                scale=scale,
-                original_shapes=original_shapes,
-                original_alpha=0.3,
-                show_displacement=True,
-                show_stress=True,
-                displacement_offset=(0, 0, 0),
-                stress_offset=(8000, 0, 0),
-                reference_length=reference_length,
-                stress_limit=stress_limit,
-                smooth_colors=smooth_colors,
-                subdivisions=subdivisions,
-                stress_alpha=stress_alpha,
-            )
-        else:
-            show_fea_results(
-                mesh_file=str(output_dir / "mesh.inp"),
-                frd_file=str(output_dir / "analysis.frd"),
-                scale=scale,
-                original_shapes=original_shapes,
-                deformed_color="red",
-                original_alpha=0.3,
-            )

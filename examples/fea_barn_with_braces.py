@@ -12,9 +12,9 @@ from pathlib import Path
 from ocp_vscode import reset_show, show_object
 
 from timber_joints.barn import BarnConfig, BarnFrame
-from timber_joints.fea import LoadBC
+from timber_joints.fea import LoadBC, export_fea_combined_gltf
 
-from fea_utils import visualize_frame_with_mesh, run_fea_analysis, visualize_fea_results
+from fea_utils import visualize_frame_with_mesh, run_fea_analysis
 
 reset_show()
 
@@ -113,30 +113,14 @@ result = run_fea_analysis(
 )
 
 # %%
-# Visualize FEA results (can re-run this cell without re-running analysis)
-# Load results from file if not in memory
-from fea_utils import visualize_fea_results, show_fea_results
-
-output_dir = Path(__file__).parent / "fea_barn_braced_output"
-
-# Check if we have results in memory, otherwise create a minimal result object
-if 'result' not in dir() or result is None:
-    # Create a simple namespace to hold success status
-    class LoadedResult:
-        success = (output_dir / "analysis.frd").exists()
-    result = LoadedResult()
-    print(f"Loaded result from file (success={result.success})")
-
-# Visualize with limit-based colormap
+# Export FEA results to GLTF with limit-based colormap
 # - Displacement limit: beam_length/300 (L/300 serviceability)
-# - Stress limit: 24 MPa (C24 softwood bending strength f_m_k)
-visualize_fea_results(
-    result, 
-    output_dir, 
-    cad_shapes if 'cad_shapes' in dir() else [],
-    scale=4.0,
-    reference_length=config.beam_length,  # 5000mm -> L/300 = 16.7mm
-    stress_limit=24.0,  # C24 f_m_k
-)
+# - Stress limit: from material's bending strength (f_m_k)
+if result.success:
+    export_fea_combined_gltf(
+        output_dir=output_dir,
+        scale=4.0,
+        reference_length=config.beam_length,  # 5000mm -> L/300 = 16.7mm
+    )
 
 # %%

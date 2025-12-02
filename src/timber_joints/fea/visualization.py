@@ -1,117 +1,45 @@
-"""FEA visualization utilities for OCP CAD Viewer."""
+"""FEA visualization utilities for 3D Viewer for VSCode via GLTF export."""
 
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import json
 import numpy as np
 
-from OCP.BRepBuilderAPI import BRepBuilderAPI_MakePolygon, BRepBuilderAPI_MakeFace
-from OCP.gp import gp_Pnt
-from OCP.BRep import BRep_Builder
-from OCP.TopoDS import TopoDS_Compound
-
-from build123d import Compound, Cylinder, Cone, Location, Rotation
-
 from .backends.calculix import read_frd_nodes, read_frd_displacements, read_frd_stresses, compute_von_mises
+from .materials import get_default_material
+
+# Import trimesh for mesh export with vertex colors
+try:
+    import trimesh
+    TRIMESH_AVAILABLE = True
+except ImportError:
+    TRIMESH_AVAILABLE = False
+
+
+def hex_to_rgba_int(hex_color: str, alpha: int = 255) -> Tuple[int, int, int, int]:
+    """Convert hex color string to RGBA integers (0-255 range).
+    
+    Args:
+        hex_color: Color string like "#FF0000" or "FF0000"
+        alpha: Alpha value (0-255)
+        
+    Returns:
+        (r, g, b, a) tuple with values in 0-255 range
+    """
+    hex_color = hex_color.lstrip('#')
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    return (r, g, b, alpha)
 
 
 # C3D4 tetrahedron face definitions (0-indexed into node list)
-# Each face is defined with outward-pointing normal using right-hand rule
-# Face i is opposite to node i
 C3D4_FACE_INDICES = [
     (1, 3, 2),  # Face 0: opposite to node 0
     (0, 2, 3),  # Face 1: opposite to node 1
     (0, 3, 1),  # Face 2: opposite to node 2
     (0, 1, 2),  # Face 3: opposite to node 3
 ]
-
-
-def build_force_arrow(
-    position: Tuple[float, float, float],
-    direction: Tuple[float, float, float],
-    magnitude: float,
-    arrow_length: float = 300.0,
-    shaft_radius: float = 15.0,
-    head_radius: float = 40.0,
-    head_length: float = 80.0,
-    offset: float = 50.0,
-) -> Compound:
-    """Build a 3D arrow representing a force vector.
-    
-    Arrow points in the direction of the force, with tip offset from the position
-    so the arrow body is outside the material.
-    
-    Args:
-        position: (x, y, z) point where force is applied
-        direction: (dx, dy, dz) force direction (will be normalized)
-        magnitude: Force magnitude (N) - used for scaling
-        arrow_length: Total arrow length in mm
-        shaft_radius: Radius of arrow shaft
-        head_radius: Radius of arrow head base
-        head_length: Length of arrow head cone
-        offset: Distance to offset arrow tip from position (away from surface)
-        
-    Returns:
-        Compound containing shaft cylinder and head cone
-    """
-    from build123d import Cylinder, Cone, Location
-    from build123d import Compound, Part, Align, Axis
-    
-    # Normalize direction
-    dx, dy, dz = direction
-    length = np.sqrt(dx**2 + dy**2 + dz**2)
-    if length < 1e-10:
-        return None
-    dx, dy, dz = dx/length, dy/length, dz/length
-    
-    # Create shaft (cylinder along Z axis, then rotate)
-    shaft_length = arrow_length - head_length
-    shaft = Cylinder(shaft_radius, shaft_length, align=(Align.CENTER, Align.CENTER, Align.MIN))
-    
-    # Create head (cone)
-    head = Cone(head_radius, 0, head_length, align=(Align.CENTER, Align.CENTER, Align.MIN))
-    head = head.move(Location((0, 0, shaft_length)))
-    
-    # Combine into compound
-    arrow = Part() + shaft + head
-    
-    # Calculate rotation to align Z axis with direction vector
-    # Default arrow points in +Z direction
-    # Need to rotate to point in (dx, dy, dz) direction
-    
-    # Calculate rotation angles
-    # First rotate around Y to get X-Z plane alignment, then around X for final direction
-    xy_length = np.sqrt(dx**2 + dy**2)
-    
-    if xy_length > 1e-10:
-        # Angle from Z axis (elevation)
-        elevation = np.degrees(np.arctan2(xy_length, dz))
-        # Angle in XY plane (azimuth)
-        azimuth = np.degrees(np.arctan2(dy, dx))
-        
-        # Apply rotations: first around Y by elevation, then around Z by azimuth
-        arrow = arrow.rotate(Axis.Y, elevation)
-        arrow = arrow.rotate(Axis.Z, azimuth)
-    elif dz < 0:
-        # Pointing in -Z direction
-        arrow = arrow.rotate(Axis.X, 180)
-    
-    # Position the arrow so its TIP is near (but outside) the load application point
-    # The arrow is built from base at Z=0 to tip at Z=arrow_length
-    # After rotation, arrow base is at origin, tip points in force direction
-    # We want: tip near position, but offset away from surface
-    # So move base to: position - (arrow_length + offset) * direction
-    total_offset = arrow_length + offset
-    offset_position = (
-        position[0] - total_offset * dx,
-        position[1] - total_offset * dy,
-        position[2] - total_offset * dz,
-    )
-    
-    # Move to offset position
-    arrow = arrow.move(Location(offset_position))
-    
-    return arrow
 
 
 def read_load_info(output_dir: Path) -> List[Dict]:
@@ -143,135 +71,81 @@ def save_load_info(output_dir: Path, loads: List[Dict]):
         json.dump(loads, f, indent=2)
 
 
+def read_material_info(output_dir: Path) -> Dict[str, Dict]:
+    """Read material information from JSON file saved during analysis.
+    
+    Args:
+        output_dir: Directory containing materials.json
+        
+    Returns:
+        Dict mapping part name to material info including stress_limit (f_m_k)
+    """
+    material_file = output_dir / "materials.json"
+    if not material_file.exists():
+        return {}
+    
+    with open(material_file, 'r') as f:
+        return json.load(f)
+
+
+def save_material_info(output_dir: Path, materials: Dict[str, Dict]):
+    """Save material information to JSON file for visualization.
+    
+    Args:
+        output_dir: Directory to save materials.json
+        materials: Dict mapping part name to material info with keys:
+            - name: material name
+            - stress_limit: f_m_k (characteristic bending strength in MPa)
+    """
+    material_file = output_dir / "materials.json"
+    with open(material_file, 'w') as f:
+        json.dump(materials, f, indent=2)
+
+
 def value_to_limit_color(value: float, limit: float) -> str:
     """Convert a value to a color based on fraction of allowable limit.
     
-    Continuous 24-bit color scheme:
+    Continuous color scheme:
     - 0-50% of limit: Blue → Cyan (safe)
     - 50-80% of limit: Cyan → Green (acceptable)
     - 80-100% of limit: Green → Red (warning to limit)
     - 100-200% of limit: Red → Magenta (exceeded)
-    - 200-300% of limit: Magenta → Purple (severely exceeded)
-    - 300-500% of limit: Purple → Dark Purple (critical)
+    - 200-500% of limit: Magenta → Purple (critical)
     
     Args:
         value: The actual value
-        limit: The allowable limit (e.g., L/300 for displacement, f_m_k for stress)
+        limit: The allowable limit
         
     Returns:
         Hex color string like "#FF0000"
     """
     if limit <= 0:
-        return "#0000FF"  # Blue if no limit
+        return "#0000FF"
     
-    # Ratio of value to limit
     ratio = value / limit
     
     if ratio <= 0.5:
-        # Blue (0%) to Cyan (50%)
         t = ratio / 0.5
         r, g, b = 0, int(255 * t), 255
     elif ratio <= 0.8:
-        # Cyan (50%) to Green (80%)
         t = (ratio - 0.5) / 0.3
         r, g, b = 0, 255, int(255 * (1 - t))
     elif ratio <= 1.0:
-        # Green (80%) to Red (100%) - warning to limit, 100% = RED
         t = (ratio - 0.8) / 0.2
         r = int(255 * t)
         g = int(255 * (1 - t))
         b = 0
     elif ratio <= 2.0:
-        # Red (100%) to Magenta (200%) - exceeded
         t = (ratio - 1.0) / 1.0
-        # Fade from red (255, 0, 0) to magenta (255, 0, 255)
-        r = 255
-        g = 0
-        b = int(255 * t)
+        r, g, b = 255, 0, int(255 * t)
     elif ratio <= 3.0:
-        # Magenta (200%) to Purple (300%) - severely exceeded
         t = (ratio - 2.0) / 1.0
-        # Fade from magenta (255, 0, 255) to purple (128, 0, 255)
-        r = int(255 - 127 * t)
-        g = 0
-        b = 255
+        r, g, b = int(255 - 127 * t), 0, 255
     else:
-        # Purple (300%) to Dark Purple (500%) - critical
         t = min(1.0, (ratio - 3.0) / 2.0)
-        # Fade from purple (128, 0, 255) to dark purple (64, 0, 128)
-        r = int(128 - 64 * t)
-        g = 0
-        b = int(255 - 127 * t)
+        r, g, b = int(128 - 64 * t), 0, int(255 - 127 * t)
     
     return f"#{r:02X}{g:02X}{b:02X}"
-
-
-def get_limit_color_bands(limit: float, n_bands: int = 2048) -> List[Tuple[float, float, str]]:
-    """Get discrete color bands for limit-based colormap.
-    
-    Bands are distributed to give more resolution near the limit:
-    - 2/3 of bands from 0 to limit (0-100%)
-    - 1/3 of bands from limit to 5*limit (100-500%)
-    
-    Returns list of (lower_value, upper_value, hex_color) tuples.
-    """
-    bands = []
-    
-    # Bands below limit (0-100%): 2/3 of total bands
-    n_below = (n_bands * 2) // 3
-    for i in range(n_below):
-        lower = limit * i / n_below
-        upper = limit * (i + 1) / n_below
-        mid = (lower + upper) / 2
-        color = value_to_limit_color(mid, limit)
-        bands.append((lower, upper, color))
-    
-    # Bands above limit (100-500%): 1/3 of total bands
-    # Goes to 500% to show full red->dark red->purple->dark purple gradient
-    n_above = n_bands - n_below
-    for i in range(n_above):
-        lower = limit * (1.0 + 4.0 * i / n_above)
-        upper = limit * (1.0 + 4.0 * (i + 1) / n_above)
-        mid = (lower + upper) / 2
-        color = value_to_limit_color(mid, limit)
-        bands.append((lower, upper, color))
-    
-    return bands
-
-
-# Legacy function for backward compatibility
-def value_to_rainbow_color(value: float, min_val: float, max_val: float) -> str:
-    """Convert a value to a rainbow color (blue -> cyan -> green -> yellow -> red).
-    
-    Args:
-        value: The value to colormap
-        min_val: Minimum value (maps to blue)
-        max_val: Maximum value (maps to red)
-        
-    Returns:
-        Hex color string like "#FF0000"
-    """
-    if max_val <= min_val:
-        return "#0000FF"  # All blue if no range
-    
-    # Normalize to 0-1, treat max as "limit"
-    normalized = (value - min_val) / (max_val - min_val)
-    return value_to_limit_color(normalized * max_val, max_val)
-
-
-def get_color_bands(n_bands: int = 12) -> List[Tuple[float, float, str]]:
-    """Get discrete color bands for the rainbow colormap.
-    
-    Returns list of (lower_frac, upper_frac, hex_color) tuples.
-    """
-    bands = []
-    for i in range(n_bands):
-        lower = i / n_bands
-        upper = (i + 1) / n_bands
-        mid = (lower + upper) / 2
-        color = value_to_limit_color(mid, 1.0)
-        bands.append((lower, upper, color))
-    return bands
 
 
 def read_mesh_elements(mesh_file: str) -> List[List[int]]:
@@ -305,281 +179,164 @@ def read_mesh_elements(mesh_file: str) -> List[List[int]]:
     return elements
 
 
+def read_mesh_element_sets(mesh_file: str) -> Dict[str, List[int]]:
+    """Read element sets from CalculiX mesh file.
+    
+    Args:
+        mesh_file: Path to mesh.inp file
+        
+    Returns:
+        Dict mapping part name (lowercase) to list of element IDs
+    """
+    element_sets = {}
+    current_elset = None
+    current_elements = []
+    
+    # Skip known aggregate sets (like TIMBER that combines other sets)
+    skip_sets = {'TIMBER', 'EALL'}
+    
+    with open(mesh_file, 'r') as f:
+        for line in f:
+            if line.startswith('*ELSET'):
+                # Save previous set if any
+                if current_elset and current_elset not in skip_sets:
+                    # Convert element set name back to part name (lowercase, underscores to spaces)
+                    part_name = current_elset.lower().replace('_', ' ')
+                    element_sets[part_name] = current_elements
+                
+                # Parse new elset name
+                for part in line.split(','):
+                    part = part.strip()
+                    if part.upper().startswith('ELSET='):
+                        current_elset = part.split('=')[1].strip().upper()
+                        break
+                current_elements = []
+                continue
+            
+            if current_elset and not line.startswith('*'):
+                # Parse element IDs (can be numbers or elset references)
+                parts = line.strip().rstrip(',').split(',')
+                for p in parts:
+                    p = p.strip()
+                    if p.isdigit():
+                        current_elements.append(int(p))
+        
+        # Save last set
+        if current_elset and current_elset not in skip_sets and current_elements:
+            part_name = current_elset.lower().replace('_', ' ')
+            element_sets[part_name] = current_elements
+    
+    return element_sets
+
+
+def read_mesh_elements_indexed(mesh_file: str) -> Dict[int, List[int]]:
+    """Read tetrahedral elements from CalculiX mesh file, indexed by element ID.
+    
+    Args:
+        mesh_file: Path to mesh.inp file
+        
+    Returns:
+        Dict mapping element_id to [n1, n2, n3, n4] node list
+    """
+    elements = {}
+    in_elements = False
+    
+    with open(mesh_file, 'r') as f:
+        for line in f:
+            if '*ELEMENT' in line.upper() and 'C3D4' in line.upper():
+                in_elements = True
+                continue
+            if in_elements:
+                if line.startswith('*'):
+                    in_elements = False
+                    continue
+                parts = line.strip().split(',')
+                if len(parts) >= 5:
+                    try:
+                        elem_id = int(parts[0].strip())
+                        nodes = [int(parts[i].strip()) for i in range(1, 5)]
+                        elements[elem_id] = nodes
+                    except ValueError:
+                        pass
+    return elements
+
+
+def create_node_to_part_mapping(mesh_file: str) -> Dict[int, str]:
+    """Create mapping from node IDs to part names based on element sets.
+    
+    Args:
+        mesh_file: Path to mesh.inp file
+        
+    Returns:
+        Dict mapping node_id to part name
+    """
+    element_sets = read_mesh_element_sets(mesh_file)
+    elements = read_mesh_elements_indexed(mesh_file)
+    
+    node_to_part = {}
+    for part_name, elem_ids in element_sets.items():
+        for elem_id in elem_ids:
+            if elem_id in elements:
+                for node_id in elements[elem_id]:
+                    # First part wins (node can belong to multiple parts at boundaries)
+                    if node_id not in node_to_part:
+                        node_to_part[node_id] = part_name
+    
+    return node_to_part
+
+
 def get_outer_faces(
     elements: List[List[int]], 
     nodes: Optional[Dict[int, Tuple[float, float, float]]] = None
 ) -> List[Tuple[int, int, int]]:
-    """Extract boundary triangular faces from tetrahedral mesh with consistent outward normals.
+    """Extract boundary triangular faces from tetrahedral mesh.
     
     Boundary faces appear exactly once (not shared between elements).
-    Uses proper winding order to ensure outward-pointing normals.
     
     Args:
         elements: List of [n1, n2, n3, n4] element connectivity
-        nodes: Optional dict mapping node_id to (x, y, z) coordinates.
-               If provided, normals are verified to point outward.
+        nodes: Optional dict mapping node_id to (x, y, z) for normal verification
         
     Returns:
-        List of (n1, n2, n3) node tuples for boundary faces with consistent winding
+        List of (n1, n2, n3) node tuples for boundary faces
     """
-    # Track faces: key is sorted tuple for comparison, value is (actual_winding, element_idx, opposite_node_idx)
     face_data = {}
     
     for elem_idx, elem in enumerate(elements):
         for face_idx, (i, j, k) in enumerate(C3D4_FACE_INDICES):
-            # Get the actual node IDs with proper winding
             n1, n2, n3 = elem[i], elem[j], elem[k]
-            
-            # Create a sorted key for identifying shared faces
             face_key = tuple(sorted([n1, n2, n3]))
             
             if face_key in face_data:
-                # Face is shared - mark for removal
-                face_data[face_key] = None
+                face_data[face_key] = None  # Shared face
             else:
-                # First time seeing this face - store with proper winding
-                # Also store the opposite node (for outward normal verification)
-                opposite_node = elem[face_idx]  # The node opposite to this face
+                opposite_node = elem[face_idx]
                 face_data[face_key] = (n1, n2, n3, opposite_node)
     
-    # Extract boundary faces (those that appear exactly once)
     boundary_faces = []
     for face_key, data in face_data.items():
         if data is not None:
             n1, n2, n3, opposite_node = data
             
-            # If we have node coordinates, verify the normal points outward
-            if nodes is not None and n1 in nodes and n2 in nodes and n3 in nodes and opposite_node in nodes:
-                # Compute face centroid
+            if nodes is not None and all(n in nodes for n in [n1, n2, n3, opposite_node]):
                 p1 = np.array(nodes[n1])
                 p2 = np.array(nodes[n2])
                 p3 = np.array(nodes[n3])
                 face_center = (p1 + p2 + p3) / 3
                 
-                # Compute face normal using right-hand rule
                 v1 = p2 - p1
                 v2 = p3 - p1
                 normal = np.cross(v1, v2)
                 
-                # Vector from opposite node to face center should align with normal
-                # (the normal should point away from the element interior)
                 opposite_pt = np.array(nodes[opposite_node])
                 outward_dir = face_center - opposite_pt
                 
-                # If normal points inward (dot product negative), flip winding
                 if np.dot(normal, outward_dir) < 0:
-                    n1, n2, n3 = n1, n3, n2  # Flip winding
+                    n1, n2, n3 = n1, n3, n2
             
             boundary_faces.append((n1, n2, n3))
     
     return boundary_faces
-
-
-def build_triangle_compound(
-    triangles: List[Tuple[int, int, int]],
-    nodes: Dict[int, Tuple[float, float, float]],
-) -> Compound:
-    """Build a build123d Compound from triangular faces.
-    
-    Args:
-        triangles: List of (n1, n2, n3) node ID tuples
-        nodes: Dict mapping node_id to (x, y, z) coordinates
-        
-    Returns:
-        build123d Compound of triangular faces
-    """
-    builder = BRep_Builder()
-    compound = TopoDS_Compound()
-    builder.MakeCompound(compound)
-    
-    for n1, n2, n3 in triangles:
-        if n1 not in nodes or n2 not in nodes or n3 not in nodes:
-            continue
-        
-        p1, p2, p3 = gp_Pnt(*nodes[n1]), gp_Pnt(*nodes[n2]), gp_Pnt(*nodes[n3])
-        
-        try:
-            polygon = BRepBuilderAPI_MakePolygon(p1, p2, p3, True)
-            if polygon.IsDone():
-                face_maker = BRepBuilderAPI_MakeFace(polygon.Wire(), True)
-                if face_maker.IsDone():
-                    builder.Add(compound, face_maker.Face())
-        except Exception:
-            pass
-    
-    return Compound(compound)
-
-
-def subdivide_triangle(
-    p1: Tuple[float, float, float],
-    p2: Tuple[float, float, float],
-    p3: Tuple[float, float, float],
-    v1: float,
-    v2: float,
-    v3: float,
-    subdivisions: int = 2,
-) -> List[Tuple[Tuple[float, float, float], Tuple[float, float, float], Tuple[float, float, float], float]]:
-    """Subdivide a triangle into smaller triangles with interpolated values.
-    
-    Uses barycentric subdivision to create a finer mesh with smoothly
-    interpolated values at each sub-vertex.
-    
-    Args:
-        p1, p2, p3: Vertex coordinates
-        v1, v2, v3: Scalar values at each vertex
-        subdivisions: Number of subdivisions per edge (2 = 4 sub-triangles, 3 = 9, etc.)
-        
-    Returns:
-        List of (vertex1, vertex2, vertex3, avg_value) tuples for each sub-triangle
-    """
-    if subdivisions < 2:
-        # No subdivision - return original
-        avg = (v1 + v2 + v3) / 3
-        return [(p1, p2, p3, avg)]
-    
-    # Create grid of points using barycentric coordinates
-    # subdivisions = n means n+1 points per edge
-    n = subdivisions
-    points = {}  # (i, j) -> (x, y, z)
-    values = {}  # (i, j) -> value
-    
-    for i in range(n + 1):
-        for j in range(n + 1 - i):
-            k = n - i - j
-            # Barycentric coordinates
-            w1, w2, w3 = i / n, j / n, k / n
-            
-            # Interpolate position
-            x = w1 * p1[0] + w2 * p2[0] + w3 * p3[0]
-            y = w1 * p1[1] + w2 * p2[1] + w3 * p3[1]
-            z = w1 * p1[2] + w2 * p2[2] + w3 * p3[2]
-            points[(i, j)] = (x, y, z)
-            
-            # Interpolate value
-            values[(i, j)] = w1 * v1 + w2 * v2 + w3 * v3
-    
-    # Generate sub-triangles
-    result = []
-    for i in range(n):
-        for j in range(n - i):
-            # Upward-pointing triangle
-            pa = points[(i, j)]
-            pb = points[(i + 1, j)]
-            pc = points[(i, j + 1)]
-            va = values[(i, j)]
-            vb = values[(i + 1, j)]
-            vc = values[(i, j + 1)]
-            avg = (va + vb + vc) / 3
-            result.append((pa, pb, pc, avg))
-            
-            # Downward-pointing triangle (if exists)
-            if i + j + 1 < n:
-                pa = points[(i + 1, j)]
-                pb = points[(i + 1, j + 1)]
-                pc = points[(i, j + 1)]
-                va = values[(i + 1, j)]
-                vb = values[(i + 1, j + 1)]
-                vc = values[(i, j + 1)]
-                avg = (va + vb + vc) / 3
-                result.append((pa, pb, pc, avg))
-    
-    return result
-
-
-def build_smooth_colored_mesh(
-    faces: List[Tuple[int, int, int]],
-    nodes: Dict[int, Tuple[float, float, float]],
-    node_values: Dict[int, float],
-    limit: float,
-    subdivisions: int = 3,
-) -> List[Tuple[Compound, str, float, float]]:
-    """Build mesh compounds with smooth color interpolation using subdivision.
-    
-    Each mesh triangle is subdivided into smaller triangles, with values
-    interpolated across the face. This creates a smoother color gradient
-    than per-element coloring.
-    
-    Args:
-        faces: List of (n1, n2, n3) node ID tuples
-        nodes: Dict mapping node_id to (x, y, z) coordinates
-        node_values: Dict mapping node_id to scalar value
-        limit: Allowable limit value for color scaling
-        subdivisions: Number of subdivisions per edge (higher = smoother)
-        
-    Returns:
-        List of (compound, hex_color, band_min, band_max) tuples
-    """
-    bands = get_limit_color_bands(limit)
-    band_triangles = {i: [] for i in range(len(bands))}
-    
-    for face in faces:
-        n1, n2, n3 = face
-        if n1 not in nodes or n2 not in nodes or n3 not in nodes:
-            continue
-        
-        p1, p2, p3 = nodes[n1], nodes[n2], nodes[n3]
-        
-        # Get values at vertices (default to 0 if missing)
-        v1 = node_values.get(n1, 0.0)
-        v2 = node_values.get(n2, 0.0)
-        v3 = node_values.get(n3, 0.0)
-        
-        # Subdivide and get sub-triangles with interpolated values
-        sub_triangles = subdivide_triangle(p1, p2, p3, v1, v2, v3, subdivisions)
-        
-        # Assign each sub-triangle to a color band based on its max value
-        # (makes stress concentrations more visible)
-        for pa, pb, pc, avg_val in sub_triangles:
-            # Use the interpolated value (which represents the local max in subdivided region)
-            # Find which band this value belongs to
-            assigned = False
-            for i, (lower, upper, color) in enumerate(bands):
-                if lower <= avg_val < upper:
-                    band_triangles[i].append((pa, pb, pc))
-                    assigned = True
-                    break
-            if not assigned:
-                # Value exceeds all bands, put in last band
-                band_triangles[len(bands) - 1].append((pa, pb, pc))
-    
-    # Build compounds for each band
-    result = []
-    for i, (lower, upper, color) in enumerate(bands):
-        if band_triangles[i]:
-            compound = build_triangle_compound_from_coords(band_triangles[i])
-            result.append((compound, color, lower, upper))
-    
-    return result
-
-
-def build_triangle_compound_from_coords(
-    triangles: List[Tuple[Tuple[float, float, float], Tuple[float, float, float], Tuple[float, float, float]]],
-) -> Compound:
-    """Build a build123d Compound from triangular faces given by coordinates.
-    
-    Args:
-        triangles: List of ((x1,y1,z1), (x2,y2,z2), (x3,y3,z3)) tuples
-        
-    Returns:
-        build123d Compound of triangular faces
-    """
-    builder = BRep_Builder()
-    compound = TopoDS_Compound()
-    builder.MakeCompound(compound)
-    
-    for p1, p2, p3 in triangles:
-        pt1, pt2, pt3 = gp_Pnt(*p1), gp_Pnt(*p2), gp_Pnt(*p3)
-        
-        try:
-            polygon = BRepBuilderAPI_MakePolygon(pt1, pt2, pt3, True)
-            if polygon.IsDone():
-                face_maker = BRepBuilderAPI_MakeFace(polygon.Wire(), True)
-                if face_maker.IsDone():
-                    builder.Add(compound, face_maker.Face())
-        except Exception:
-            pass
-    
-    return Compound(compound)
 
 
 def apply_displacements(
@@ -592,7 +349,7 @@ def apply_displacements(
     Args:
         nodes: Original node coordinates
         displacements: Node displacements (ux, uy, uz)
-        scale: Displacement scale factor for visualization
+        scale: Displacement scale factor
         
     Returns:
         New dict with deformed coordinates
@@ -607,301 +364,192 @@ def apply_displacements(
     return deformed
 
 
-def build_deformed_mesh(
-    mesh_file: str,
-    frd_file: str,
-    scale: float = 10.0,
-) -> Tuple[Compound, Dict]:
-    """Build deformed mesh visualization from FEA results.
+def build_arrow_mesh(
+    position: Tuple[float, float, float],
+    direction: Tuple[float, float, float],
+    arrow_length: float = 0.3,
+    shaft_radius: float = 0.015,
+    head_radius: float = 0.04,
+    head_length: float = 0.08,
+    offset: float = 0.05,
+    color: Tuple[int, int, int, int] = (255, 0, 0, 255),
+    unit_scale: float = 0.001,
+    center_x: float = 0.0,
+) -> "trimesh.Trimesh":
+    """Build a 3D arrow mesh for visualizing force vectors.
+    
+    Arrow points in the direction of the force, positioned outside the material.
     
     Args:
-        mesh_file: Path to mesh.inp file
-        frd_file: Path to .frd results file
-        scale: Displacement magnification factor
+        position: (x, y, z) point where force is applied (in mm, FEA coords)
+        direction: (dx, dy, dz) force direction in FEA coords (will be normalized)
+        arrow_length: Total arrow length in meters
+        shaft_radius: Radius of arrow shaft in meters
+        head_radius: Radius of arrow head base in meters
+        head_length: Length of arrow head cone in meters
+        offset: Distance to offset arrow tip from position in meters
+        color: RGBA color tuple (0-255)
+        unit_scale: Scale factor for position (default 0.001 = mm to meters)
+        center_x: X center offset to subtract from position
         
     Returns:
-        Tuple of (deformed_compound, info_dict)
-        info_dict contains: nodes, displacements, max_disp, elements
+        trimesh.Trimesh of the arrow, or None if direction is zero
     """
-    nodes = read_frd_nodes(frd_file)
-    displacements = read_frd_displacements(frd_file)
-    elements = read_mesh_elements(mesh_file)
+    if not TRIMESH_AVAILABLE:
+        return None
     
-    if not nodes or not displacements or not elements:
-        raise ValueError("Missing mesh or results data")
+    # Normalize direction in FEA coordinates
+    dx, dy, dz = direction
+    length = np.sqrt(dx**2 + dy**2 + dz**2)
+    if length < 1e-10:
+        return None
+    dx, dy, dz = dx/length, dy/length, dz/length
     
-    # Calculate max displacement
-    max_disp = 0.0
-    for ux, uy, uz in displacements.values():
-        mag = np.sqrt(ux**2 + uy**2 + uz**2)
-        if mag > max_disp:
-            max_disp = mag
+    # Transform direction from FEA coords (X, Y, Z) to viewer coords (X, Z, Y)
+    # FEA Y -> Viewer Z, FEA Z -> Viewer Y
+    dir_viewer = np.array([dx, dz, dy])
     
-    # Build deformed coordinates
-    deformed_nodes = apply_displacements(nodes, displacements, scale)
+    # Create shaft (cylinder) and head (cone) using trimesh primitives
+    shaft_length = arrow_length - head_length
     
-    # Get boundary faces and build compound (pass nodes for proper normal orientation)
-    outer_faces = get_outer_faces(elements, nodes)
-    deformed_compound = build_triangle_compound(outer_faces, deformed_nodes)
+    # Create cylinder for shaft - centered at origin along Z
+    shaft = trimesh.creation.cylinder(
+        radius=shaft_radius,
+        height=shaft_length,
+        sections=16,
+    )
+    # Shaft is centered, move so bottom is at z=0
+    shaft.apply_translation([0, 0, shaft_length / 2])
     
-    info = {
-        "nodes": nodes,
-        "deformed_nodes": deformed_nodes,
-        "displacements": displacements,
-        "max_displacement": max_disp,
-        "num_elements": len(elements),
-        "num_surface_faces": len(outer_faces),
-        "scale_factor": scale,
-        "outer_faces": outer_faces,
-        "elements": elements,
-    }
+    # Create cone for head - tip at top
+    head = trimesh.creation.cone(
+        radius=head_radius,
+        height=head_length,
+        sections=16,
+    )
+    # Cone is created with base at z=0 and tip at z=height
+    # Move so base connects to top of shaft
+    head.apply_translation([0, 0, shaft_length])
     
-    return deformed_compound, info
+    # Combine shaft and head
+    arrow = trimesh.util.concatenate([shaft, head])
+    
+    # Calculate rotation matrix to align +Z axis with viewer direction vector
+    z_axis = np.array([0, 0, 1])
+    target = dir_viewer / np.linalg.norm(dir_viewer)
+    
+    # Handle the case where target is parallel or anti-parallel to z_axis
+    dot = np.dot(z_axis, target)
+    if abs(dot - 1.0) < 1e-6:
+        # Already aligned
+        rotation_matrix = np.eye(4)
+    elif abs(dot + 1.0) < 1e-6:
+        # Opposite direction - rotate 180 around X
+        rotation_matrix = trimesh.transformations.rotation_matrix(np.pi, [1, 0, 0])
+    else:
+        # General case - rotate around cross product
+        axis = np.cross(z_axis, target)
+        axis = axis / np.linalg.norm(axis)
+        angle = np.arccos(np.clip(dot, -1.0, 1.0))
+        rotation_matrix = trimesh.transformations.rotation_matrix(angle, axis)
+    
+    arrow.apply_transform(rotation_matrix)
+    
+    # Convert position from mm to meters and apply coordinate transform
+    # FEA: X, Y, Z -> Viewer: X, Z, Y (swap Y and Z)
+    px = (position[0] - center_x) * unit_scale
+    py = position[2] * unit_scale  # FEA Z becomes Viewer Y
+    pz = position[1] * unit_scale  # FEA Y becomes Viewer Z
+    
+    # Position the arrow so its TIP is near (but outside) the load application point
+    # Arrow tip is at arrow_length along the direction
+    # Move base to: position - (arrow_length + offset) * direction
+    total_offset = arrow_length + offset
+    offset_position = (
+        px - total_offset * target[0],
+        py - total_offset * target[1],
+        pz - total_offset * target[2],
+    )
+    
+    arrow.apply_translation(offset_position)
+    
+    # Apply color to all vertices
+    arrow.visual.vertex_colors = np.tile(color, (len(arrow.vertices), 1))
+    
+    return arrow
 
 
-def build_colored_mesh_by_bands(
-    faces: List[Tuple[int, int, int]],
-    nodes: Dict[int, Tuple[float, float, float]],
-    node_values: Dict[int, float],
-    min_val: float,
-    max_val: float,
-    n_bands: int = 12,
-) -> List[Tuple[Compound, str]]:
-    """Build mesh compounds colored by discrete bands of a scalar field.
-    
-    Groups faces by color band to reduce number of objects displayed.
-    
-    Args:
-        faces: List of (n1, n2, n3) node ID tuples
-        nodes: Dict mapping node_id to (x, y, z) coordinates
-        node_values: Dict mapping node_id to scalar value (e.g., displacement mag)
-        min_val: Minimum value for colormap
-        max_val: Maximum value for colormap
-        n_bands: Number of color bands
-        
-    Returns:
-        List of (compound, hex_color) tuples, one per band
-    """
-    bands = get_color_bands(n_bands)
-    band_faces = {i: [] for i in range(n_bands)}
-    
-    val_range = max_val - min_val if max_val > min_val else 1.0
-    
-    for face in faces:
-        n1, n2, n3 = face
-        # Use average value of face nodes
-        vals = []
-        for nid in (n1, n2, n3):
-            if nid in node_values:
-                vals.append(node_values[nid])
-        
-        if not vals:
-            continue
-        
-        avg_val = sum(vals) / len(vals)
-        normalized = (avg_val - min_val) / val_range
-        normalized = max(0.0, min(0.9999, normalized))  # Clamp to [0, 1)
-        
-        band_idx = int(normalized * n_bands)
-        band_faces[band_idx].append(face)
-    
-    result = []
-    for i, (lower, upper, color) in enumerate(bands):
-        if band_faces[i]:
-            compound = build_triangle_compound(band_faces[i], nodes)
-            result.append((compound, color))
-    
-    return result
-
-
-def build_colored_mesh_by_limit(
-    faces: List[Tuple[int, int, int]],
-    nodes: Dict[int, Tuple[float, float, float]],
-    node_values: Dict[int, float],
-    limit: float,
-) -> List[Tuple[Compound, str, float, float]]:
-    """Build mesh compounds colored by fraction of allowable limit.
-    
-    Uses engineering color scheme:
-    - Blue/Cyan: 0-50% of limit (safe)
-    - Green: 50-80% of limit (acceptable)  
-    - Yellow/Orange: 80-100% of limit (warning)
-    - Red: 100-120% of limit (exceeded)
-    - Magenta: >120% of limit (critical)
-    
-    Args:
-        faces: List of (n1, n2, n3) node ID tuples
-        nodes: Dict mapping node_id to (x, y, z) coordinates
-        node_values: Dict mapping node_id to scalar value
-        limit: Allowable limit value
-        
-    Returns:
-        List of (compound, hex_color, band_min, band_max) tuples
-    """
-    bands = get_limit_color_bands(limit)
-    band_faces = {i: [] for i in range(len(bands))}
-    
-    for face in faces:
-        n1, n2, n3 = face
-        # Use max value of face nodes (makes stress concentrations more visible)
-        vals = []
-        for nid in (n1, n2, n3):
-            if nid in node_values:
-                vals.append(node_values[nid])
-        
-        if not vals:
-            continue
-        
-        max_val = max(vals)
-        
-        # Find which band this value belongs to
-        for i, (lower, upper, color) in enumerate(bands):
-            if lower <= max_val < upper:
-                band_faces[i].append(face)
-                break
-        else:
-            # Value exceeds all bands, put in last band
-            band_faces[len(bands) - 1].append(face)
-    
-    result = []
-    for i, (lower, upper, color) in enumerate(bands):
-        if band_faces[i]:
-            compound = build_triangle_compound(band_faces[i], nodes)
-            result.append((compound, color, lower, upper))
-    
-    return result
-
-
-def show_fea_results(
-    mesh_file: str,
-    frd_file: str,
+def export_fea_combined_gltf(
+    output_dir: str,
     scale: float = 10.0,
-    original_shapes: Optional[List[Tuple[Any, str, str]]] = None,
-    deformed_color: str = "red",
-    original_alpha: float = 0.3,
-):
-    """Visualize FEA results in OCP CAD Viewer (legacy single-color version).
-    
-    Args:
-        mesh_file: Path to mesh.inp file
-        frd_file: Path to .frd results file  
-        scale: Displacement magnification factor
-        original_shapes: List of (shape, name, color) tuples to show
-        deformed_color: Color for deformed mesh
-        original_alpha: Transparency for original shapes
-    """
-    from ocp_vscode import show_object, reset_show
-    
-    deformed, info = build_deformed_mesh(mesh_file, frd_file, scale)
-    
-    print(f"\nFEA Visualization:")
-    print(f"  Elements: {info['num_elements']}")
-    print(f"  Surface faces: {info['num_surface_faces']}")
-    print(f"  Max displacement: {info['max_displacement']:.4f} mm")
-    print(f"  Scale factor: {scale}x")
-    print(f"  Scaled max: {info['max_displacement'] * scale:.2f} mm")
-    
-    reset_show()
-    
-    # Show original geometry
-    if original_shapes:
-        for shape, name, color in original_shapes:
-            show_object(shape, name=name, options={"color": color, "alpha": original_alpha})
-    
-    # Show deformed mesh
-    show_object(deformed, name=f"Deformed ({scale}x)", options={"color": deformed_color})
-    
-    return info
-
-
-def show_fea_results_colormap(
-    mesh_file: str,
-    frd_file: str,
-    scale: float = 10.0,
-    original_shapes: Optional[List[Tuple[Any, str, str]]] = None,
-    original_alpha: float = 0.3,
-    show_displacement: bool = True,
-    show_stress: bool = True,
-    show_loads: bool = True,
-    displacement_offset: Tuple[float, float, float] = (0, 0, 0),
-    stress_offset: Tuple[float, float, float] = (8000, 0, 0),
     displacement_limit: Optional[float] = None,
     stress_limit: Optional[float] = None,
     reference_length: Optional[float] = None,
+    spacing: float = 8.0,
+    unit_scale: float = 0.001,
+    auto_open: bool = True,
+    show_loads: bool = True,
     arrow_scale: float = 1.0,
-    smooth_colors: bool = True,
-    subdivisions: int = 3,
-    stress_alpha: float = 0.7,
-):
-    """Visualize FEA results with limit-based colormaps for displacement and stress.
+) -> Dict[str, Any]:
+    """Export FEA results as a single GLTF with original, displacement, and stress side by side.
     
-    Colors are based on fraction of allowable limits:
-    - Blue/Cyan (0-50%): Safe
-    - Green (50-80%): Acceptable
-    - Yellow/Orange (80-100%): Warning - approaching limit
-    - Red (100-120%): Exceeded limit
-    - Magenta (>120%): Critical failure
+    Creates one GLTF file containing three meshes arranged horizontally:
+    - Left: Original shape (gray)
+    - Center: Displacement colored mesh (deformed) with load arrows
+    - Right: Stress colored mesh (deformed) with load arrows
+    
+    Stress coloring uses per-part material stress limits (f_m_k) when available.
     
     Args:
-        mesh_file: Path to mesh.inp file
-        frd_file: Path to .frd results file  
+        output_dir: Directory containing mesh.inp and analysis.frd, output goes here too
         scale: Displacement magnification factor
-        original_shapes: List of (shape, name, color) tuples to show
-        original_alpha: Transparency for original shapes
-        show_displacement: Show displacement colormap
-        show_stress: Show stress colormap
-        show_loads: Show force arrows at load application points
-        displacement_offset: (x, y, z) offset for displacement visualization
-        stress_offset: (x, y, z) offset for stress visualization
-        displacement_limit: Allowable displacement (mm). If None, uses reference_length/300
-        stress_limit: Allowable stress (MPa). If None, uses 24 MPa (C24 bending strength)
-        reference_length: Reference length for L/300 displacement limit (mm)
+        displacement_limit: Limit for displacement (default: L/300)
+        stress_limit: Fallback limit for stress if per-part materials not available
+        reference_length: Reference length for L/300 calculation
+        spacing: Spacing between meshes in meters (default 8.0)
+        unit_scale: Scale factor to convert coordinates (default 0.001 = mm to meters)
+        auto_open: If True, automatically open the GLTF file in VSCode
+        show_loads: If True, show force arrows at load application points
         arrow_scale: Scale factor for force arrows (1.0 = default size)
-        smooth_colors: Use subdivision for smoother color gradients (default True)
-        subdivisions: Number of subdivisions per triangle edge (higher = smoother)
-        stress_alpha: Transparency for stress visualization (0.7 = slightly transparent to see inside joints)
         
     Returns:
-        Dict with visualization info including max values and limit checks
+        Dict with info for the export
     """
-    from ocp_vscode import show
-    from build123d import Location
+    if not TRIMESH_AVAILABLE:
+        raise ImportError(
+            "trimesh is required for GLTF export. "
+            "Install with: pip install trimesh[easy]"
+        )
+    
+    # Derive file paths from output_dir
+    output_dir_path = Path(output_dir)
+    mesh_file = str(output_dir_path / "mesh.inp")
+    frd_file = str(output_dir_path / "analysis.frd")
+    output_file = str(output_dir_path / "fea_results.gltf")
     
     # Load mesh and results
     nodes = read_frd_nodes(frd_file)
     displacements = read_frd_displacements(frd_file)
+    stresses = read_frd_stresses(frd_file)
     elements = read_mesh_elements(mesh_file)
     
     if not nodes or not displacements or not elements:
         raise ValueError("Missing mesh or results data")
     
-    # Calculate displacement magnitudes
-    disp_magnitudes = {}
+    # Calculate displacement values
+    disp_values = {}
     max_disp = 0.0
     for nid, (ux, uy, uz) in displacements.items():
         mag = np.sqrt(ux**2 + uy**2 + uz**2)
-        disp_magnitudes[nid] = mag
+        disp_values[nid] = mag
         if mag > max_disp:
             max_disp = mag
     
-    # Load stresses if needed
-    stresses = {}
-    von_mises = {}
-    max_vm = 0.0
-    if show_stress:
-        stresses = read_frd_stresses(frd_file)
-        for nid, (sxx, syy, szz, sxy, syz, szx) in stresses.items():
-            vm = compute_von_mises(sxx, syy, szz, sxy, syz, szx)
-            von_mises[nid] = vm
-            if vm > max_vm:
-                max_vm = vm
-    
-    # Determine limits
+    # Determine displacement limit
     if displacement_limit is None:
         if reference_length is not None:
-            displacement_limit = reference_length / 300  # L/300 serviceability
+            displacement_limit = reference_length / 300
         else:
-            # Estimate from geometry - use max coordinate range
             coords = list(nodes.values())
             x_range = max(c[0] for c in coords) - min(c[0] for c in coords)
             y_range = max(c[1] for c in coords) - min(c[1] for c in coords)
@@ -909,102 +557,146 @@ def show_fea_results_colormap(
             reference_length = max(x_range, y_range, z_range)
             displacement_limit = reference_length / 300
     
-    if stress_limit is None:
-        # Default to C24 softwood bending strength (characteristic value)
-        stress_limit = 24.0  # MPa
+    # Calculate stress values
+    stress_values = {}
+    max_stress = 0.0
+    for nid, (sxx, syy, szz, sxy, syz, szx) in stresses.items():
+        vm = compute_von_mises(sxx, syy, szz, sxy, syz, szx)
+        stress_values[nid] = vm
+        if vm > max_stress:
+            max_stress = vm
+    
+    # Get per-node stress limits from per-part materials
+    node_to_part = create_node_to_part_mapping(mesh_file)
+    material_info = read_material_info(output_dir_path)
+    
+    # Build per-node stress limits
+    node_stress_limits = {}
+    fallback_stress_limit = stress_limit
+    
+    if fallback_stress_limit is None:
+        # Get fallback stress limit from default timber material
+        material = get_default_material()
+        if material.strength is not None:
+            fallback_stress_limit = material.strength.f_m_k
+        else:
+            fallback_stress_limit = 24.0  # Fallback to C24 bending strength
+    
+    # Map each node to its part's stress limit
+    for nid in nodes:
+        part_name = node_to_part.get(nid)
+        if part_name and part_name in material_info:
+            node_stress_limits[nid] = material_info[part_name].get("stress_limit", fallback_stress_limit)
+        else:
+            node_stress_limits[nid] = fallback_stress_limit
+    
+    # Calculate max stress ratio for reporting
+    max_stress_ratio = 0.0
+    max_stress_part = None
+    for nid, stress_val in stress_values.items():
+        limit = node_stress_limits.get(nid, fallback_stress_limit)
+        ratio = stress_val / limit if limit > 0 else 0
+        if ratio > max_stress_ratio:
+            max_stress_ratio = ratio
+            max_stress_part = node_to_part.get(nid, "unknown")
     
     # Build deformed coordinates
     deformed_nodes = apply_displacements(nodes, displacements, scale)
     
-    # Get boundary faces (pass nodes for proper normal orientation)
+    # Get boundary faces
     outer_faces = get_outer_faces(elements, nodes)
     
-    # Check against limits
-    disp_ratio = max_disp / displacement_limit if displacement_limit > 0 else 0
-    stress_ratio = max_vm / stress_limit if stress_limit > 0 else 0
+    # Calculate mesh center for proper spacing
+    coords = list(nodes.values())
+    center_x = (max(c[0] for c in coords) + min(c[0] for c in coords)) / 2
     
-    disp_status = "✓ OK" if disp_ratio <= 1.0 else "✗ EXCEEDED"
-    stress_status = "✓ OK" if stress_ratio <= 1.0 else "✗ EXCEEDED"
-    
-    print(f"\n{'='*60}")
-    print(f"FEA RESULTS - LIMIT-BASED COLORMAP")
-    print(f"{'='*60}")
-    print(f"Mesh: {len(elements)} elements, {len(outer_faces)} surface faces")
-    print(f"Scale factor: {scale}x")
-    print()
-    print(f"DISPLACEMENT CHECK:")
-    print(f"  Max displacement: {max_disp:.4f} mm")
-    print(f"  Allowable (L/300): {displacement_limit:.4f} mm")
-    print(f"  Ratio: {disp_ratio*100:.1f}% {disp_status}")
-    print()
-    if show_stress:
-        print(f"STRESS CHECK:")
-        print(f"  Max von Mises: {max_vm:.2f} MPa")
-        print(f"  Allowable: {stress_limit:.1f} MPa")
-        print(f"  Ratio: {stress_ratio*100:.1f}% {stress_status}")
-        print()
-    
-    print(f"COLOR LEGEND:")
-    print(f"  Blue→Cyan:        0-50% of limit (safe)")
-    print(f"  Cyan→Green:       50-80% of limit (acceptable)")
-    print(f"  Green→Red:        80-100% of limit (warning)")
-    print(f"  Red→Magenta:      100-200% of limit (EXCEEDED)")
-    print(f"  Magenta→Purple:   200-300% of limit (severely exceeded)")
-    print(f"  Purple→Dark:      300-500% of limit (critical)")
-    if smooth_colors:
-        print(f"  Smoothing: {subdivisions}x subdivision per triangle")
-    print(f"{'='*60}")
-    
-    # Collect all objects to show
-    objects_to_show = []
-    
-    # Original geometry (offset to the left)
-    if original_shapes:
-        for shape, name, color in original_shapes:
-            offset_shape = shape.move(Location((-8000, 0, 0)))
-            objects_to_show.append((offset_shape, f"Original: {name}", {"color": color, "alpha": original_alpha}))
-    
-    # Choose mesh building function based on smoothing setting
-    if smooth_colors:
-        build_mesh_fn = lambda faces, nodes, values, limit: build_smooth_colored_mesh(
-            faces, nodes, values, limit, subdivisions=subdivisions
+    def build_mesh_with_offset(node_coords, node_values, limit_or_limits, x_offset, default_color=None):
+        """Build a trimesh with given nodes, colors, and X offset.
+        
+        Args:
+            node_coords: Dict[int, tuple] node coordinates
+            node_values: Dict[int, float] values per node
+            limit_or_limits: float (single limit) or Dict[int, float] (per-node limits)
+            x_offset: X offset for positioning
+            default_color: If set, use this color for all vertices
+        """
+        # Handle both single limit and per-node limits
+        use_per_node_limits = isinstance(limit_or_limits, dict)
+        single_limit = limit_or_limits if not use_per_node_limits else None
+        
+        node_to_vertex = {}
+        vertices = []
+        colors = []
+        
+        for face in outer_faces:
+            for nid in face:
+                if nid not in node_to_vertex:
+                    if nid not in node_coords:
+                        continue
+                    x, y, z = node_coords[nid]
+                    
+                    # Apply unit scale and swap Y/Z, add X offset
+                    xs = (x - center_x) * unit_scale + x_offset
+                    ys = z * unit_scale
+                    zs = y * unit_scale
+                    
+                    # Get color
+                    if default_color is not None:
+                        rgba = default_color
+                    else:
+                        value = node_values.get(nid, 0.0)
+                        if use_per_node_limits:
+                            limit = limit_or_limits.get(nid, fallback_stress_limit)
+                        else:
+                            limit = single_limit
+                        hex_color = value_to_limit_color(value, limit)
+                        rgba = hex_to_rgba_int(hex_color, alpha=255)
+                    
+                    vertex_idx = len(vertices)
+                    node_to_vertex[nid] = vertex_idx
+                    vertices.append([xs, ys, zs])
+                    colors.append(rgba)
+        
+        # Build faces with reversed winding for correct normals
+        faces = []
+        for n1, n2, n3 in outer_faces:
+            if n1 in node_to_vertex and n2 in node_to_vertex and n3 in node_to_vertex:
+                v1, v2, v3 = node_to_vertex[n1], node_to_vertex[n2], node_to_vertex[n3]
+                faces.append([v1, v3, v2])  # Reversed winding
+        
+        vertices_np = np.array(vertices, dtype=np.float64)
+        faces_np = np.array(faces, dtype=np.int64)
+        colors_np = np.array(colors, dtype=np.uint8)
+        
+        return trimesh.Trimesh(
+            vertices=vertices_np,
+            faces=faces_np,
+            vertex_colors=colors_np,
+            process=False,
         )
-    else:
-        build_mesh_fn = build_colored_mesh_by_limit
     
-    # Displacement colormap using limits
-    if show_displacement:
-        disp_bands = build_mesh_fn(
-            outer_faces, deformed_nodes, disp_magnitudes, displacement_limit
-        )
-        for compound, color, band_min, band_max in disp_bands:
-            offset_compound = compound.move(Location(displacement_offset))
-            # Label with percentage of limit
-            pct_min = band_min / displacement_limit * 100
-            pct_max = band_max / displacement_limit * 100
-            objects_to_show.append((
-                offset_compound, 
-                f"Disp {pct_min:.0f}-{pct_max:.0f}%", 
-                {"color": color}
-            ))
+    # Build three meshes side by side
+    original_mesh = build_mesh_with_offset(
+        nodes, {}, 1.0, -spacing,
+        default_color=(180, 180, 180, 255)  # Gray
+    )
     
-    # Stress colormap using limits (with transparency to see inside joints)
-    if show_stress and von_mises:
-        stress_bands = build_mesh_fn(
-            outer_faces, deformed_nodes, von_mises, stress_limit
-        )
-        for compound, color, band_min, band_max in stress_bands:
-            offset_compound = compound.move(Location(stress_offset))
-            # Label with percentage of limit
-            pct_min = band_min / stress_limit * 100
-            pct_max = band_max / stress_limit * 100
-            objects_to_show.append((
-                offset_compound,
-                f"Stress {pct_min:.0f}-{pct_max:.0f}%",
-                {"color": color, "alpha": stress_alpha}
-            ))
+    disp_mesh = build_mesh_with_offset(
+        deformed_nodes, disp_values, displacement_limit, 0.0
+    )
     
-    # Load force arrows
+    # Use per-node stress limits for stress visualization
+    stress_mesh = build_mesh_with_offset(
+        deformed_nodes, stress_values, node_stress_limits, spacing
+    )
+    
+    # Combine into a scene
+    scene = trimesh.Scene()
+    scene.add_geometry(original_mesh, node_name="original")
+    scene.add_geometry(disp_mesh, node_name="displacement")
+    scene.add_geometry(stress_mesh, node_name="stress")
+    
+    # Add load arrows
     if show_loads:
         output_dir = Path(mesh_file).parent
         loads = read_load_info(output_dir)
@@ -1012,67 +704,111 @@ def show_fea_results_colormap(
         # Filter out self-weight loads (they have "_sw_" in name)
         custom_loads = [l for l in loads if "_sw_" not in l["name"]]
         
-        for load in custom_loads:
+        for i, load in enumerate(custom_loads):
             pos = tuple(load["position"])
             direction = tuple(load["direction"])
-            magnitude = load["magnitude"]
             
-            # Scale arrow size based on magnitude (larger loads = bigger arrows)
-            # Use log scale to prevent huge differences
-            base_length = 300 * arrow_scale
+            # Arrow parameters scaled
+            arrow_length = 0.3 * arrow_scale
+            shaft_radius = 0.015 * arrow_scale
+            head_radius = 0.04 * arrow_scale
+            head_length = 0.08 * arrow_scale
             
-            arrow = build_force_arrow(
+            # Add arrow to displacement view (center, offset = 0)
+            arrow_disp = build_arrow_mesh(
                 position=pos,
                 direction=direction,
-                magnitude=magnitude,
-                arrow_length=base_length,
-                shaft_radius=15 * arrow_scale,
-                head_radius=40 * arrow_scale,
-                head_length=80 * arrow_scale,
+                arrow_length=arrow_length,
+                shaft_radius=shaft_radius,
+                head_radius=head_radius,
+                head_length=head_length,
+                color=(255, 50, 50, 255),  # Red
+                unit_scale=unit_scale,
+                center_x=center_x,
             )
+            if arrow_disp:
+                scene.add_geometry(arrow_disp, node_name=f"load_disp_{i}")
             
-            if arrow:
-                # Add arrows to displacement view (center)
-                arrow_disp = arrow.move(Location(displacement_offset))
-                objects_to_show.append((
-                    arrow_disp,
-                    f"Load: {load['name']} ({magnitude:.0f}N)",
-                    {"color": "red"}
-                ))
-                
-                # Add arrows to stress view (right)
-                if show_stress:
-                    arrow_stress = arrow.move(Location(stress_offset))
-                    objects_to_show.append((
-                        arrow_stress,
-                        f"Load: {load['name']}",
-                        {"color": "red"}
-                    ))
+            # Add arrow to stress view (right, offset = spacing)
+            arrow_stress = build_arrow_mesh(
+                position=pos,
+                direction=direction,
+                arrow_length=arrow_length,
+                shaft_radius=shaft_radius,
+                head_radius=head_radius,
+                head_length=head_length,
+                color=(255, 50, 50, 255),  # Red
+                unit_scale=unit_scale,
+                center_x=center_x,
+            )
+            if arrow_stress:
+                # Offset to stress position
+                arrow_stress.apply_translation([spacing, 0, 0])
+                scene.add_geometry(arrow_stress, node_name=f"load_stress_{i}")
     
-    # Show all objects
-    shapes = [obj for obj, name, opts in objects_to_show]
-    names = [name for obj, name, opts in objects_to_show]
-    colors = [opts.get("color", "gray") for obj, name, opts in objects_to_show]
-    alphas = [opts.get("alpha", 1.0) for obj, name, opts in objects_to_show]
+    # Export
+    output_path = Path(output_file)
+    scene.export(str(output_path), file_type='gltf')
     
-    show(*shapes, names=names, colors=colors, alphas=alphas, render_edges=False)
+    disp_ratio = max_disp / displacement_limit if displacement_limit > 0 else 0
     
-    print(f"\nLayout:")
-    print(f"  Left (-8000): Original geometry")
-    print(f"  Center (0): Displacement (limit={displacement_limit:.2f}mm)")
-    if show_stress:
-        print(f"  Right (+8000): Stress (limit={stress_limit:.1f}MPa)")
+    print(f"\n{'='*60}")
+    print("FEA RESULTS EXPORTED (Combined GLTF)")
+    print(f"{'='*60}")
+    print(f"Output: {output_path}")
+    print(f"\nLayout (left to right):")
+    print(f"  1. Original shape (gray)")
+    print(f"  2. Displacement: max {max_disp:.4f} mm ({disp_ratio*100:.1f}% of limit)")
+    print(f"  3. Stress: max {max_stress:.2f} MPa ({max_stress_ratio*100:.1f}% of limit in {max_stress_part})")
+    print(f"\nLimits:")
+    print(f"  Displacement: {displacement_limit:.4f} mm (L/300)")
+    
+    # Show per-part stress limits if we have material info
+    if material_info:
+        print(f"  Stress limits (per-part from materials):")
+        for part_name, info in material_info.items():
+            limit = info.get("stress_limit", fallback_stress_limit)
+            mat_name = info.get("name", "unknown")
+            print(f"    {part_name}: {limit:.1f} MPa ({mat_name})")
+    else:
+        print(f"  Stress: {fallback_stress_limit:.1f} MPa (fallback)")
+    
+    if show_loads:
+        output_dir = Path(mesh_file).parent
+        loads = read_load_info(output_dir)
+        custom_loads = [l for l in loads if "_sw_" not in l["name"]]
+        if custom_loads:
+            print(f"\nLoads (red arrows):")
+            for load in custom_loads:
+                print(f"  {load['name']}: {load['magnitude']:.0f} N")
+    print(f"\nColor Legend:")
+    print(f"  Blue→Cyan:      0-50% of limit (safe)")
+    print(f"  Cyan→Green:     50-80% of limit (acceptable)")
+    print(f"  Green→Red:      80-100% of limit (warning)")
+    print(f"  Red→Magenta:    100-200% of limit (EXCEEDED)")
+    print(f"  Magenta→Purple: 200-500% of limit (critical)")
+    print(f"{'='*60}")
+    
+    # Auto-open in VSCode
+    if auto_open:
+        import subprocess
+        try:
+            subprocess.run(["code", str(output_path)], check=False)
+            print(f"\nOpened: {output_path}")
+        except FileNotFoundError:
+            print(f"\nCould not auto-open (VSCode 'code' command not found)")
+            print(f"Manually open: {output_path}")
     
     return {
+        "output_file": str(output_path),
         "max_displacement": max_disp,
-        "max_von_mises": max_vm,
+        "max_stress": max_stress,
         "displacement_limit": displacement_limit,
-        "stress_limit": stress_limit,
+        "stress_limit": fallback_stress_limit,  # Fallback for API compatibility
         "displacement_ratio": disp_ratio,
-        "stress_ratio": stress_ratio,
+        "stress_ratio": max_stress_ratio,  # Now the max ratio across all parts
         "displacement_ok": disp_ratio <= 1.0,
-        "stress_ok": stress_ratio <= 1.0,
-        "num_elements": len(elements),
-        "num_surface_faces": len(outer_faces),
-        "scale_factor": scale,
+        "stress_ok": max_stress_ratio <= 1.0,
+        "max_stress_part": max_stress_part,
+        "material_info": material_info,
     }

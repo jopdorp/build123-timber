@@ -39,7 +39,7 @@ from .backends.calculix import (
     read_frd_stresses,
     compute_von_mises,
 )
-from .visualization import save_load_info
+from .visualization import save_load_info, save_material_info
 from .solver import (
     ContactParameters,
     StepConfig,
@@ -219,6 +219,28 @@ def _save_load_info_for_visualization(
     save_load_info(output_dir, loads)
 
 
+def _save_material_info_for_visualization(
+    parts: List['FEAPart'],
+    config: 'AssemblyConfig',
+    output_dir: Path,
+) -> None:
+    """Save per-part material info for visualization (stress coloring).
+    
+    Saves material name and stress limit (f_m_k bending strength) for each part.
+    """
+    materials = {}
+    for part in parts:
+        material = part.material or config.material
+        # Part name needs to match the element set name format (lowercase with spaces)
+        part_name = part.name.lower()
+        stress_limit = material.strength.f_m_k if material.strength else 24.0
+        materials[part_name] = {
+            "name": material.name,
+            "stress_limit": stress_limit,
+        }
+    
+    save_material_info(output_dir, materials)
+
 # =============================================================================
 # Generic Analysis Pipeline
 # =============================================================================
@@ -307,6 +329,9 @@ def analyze_assembly(
     
     # Save load information for visualization (force arrows)
     _save_load_info_for_visualization(load_bcs, combined, bc_node_lists, output_dir)
+    
+    # Save material information for visualization (per-part stress limits)
+    _save_material_info_for_visualization(parts, config, output_dir)
     
     # Build CalculiX input
     ccx = CalculiXInput()

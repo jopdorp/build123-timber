@@ -110,3 +110,6 @@ loads.json
 fea_results.png
 *.step
 docs/api/
+
+# FEA output directories
+examples/*_output/

@@ -136,15 +136,13 @@ from .meshing import (
 from .visualization import (
     read_mesh_elements,
     get_outer_faces,
-    build_triangle_compound,
     apply_displacements,
-    build_deformed_mesh,
-    show_fea_results,
-    show_fea_results_colormap,
-    value_to_rainbow_color,
-    build_force_arrow,
     read_load_info,
     save_load_info,
+    read_material_info,
+    save_material_info,
+    export_fea_combined_gltf,
+    value_to_limit_color,
 )
 
 # =============================================================================
@@ -245,12 +243,13 @@ __all__ = [
     # Visualization
     "read_mesh_elements",
     "get_outer_faces",
-    "build_triangle_compound",
     "apply_displacements",
-    "build_deformed_mesh",
-    "show_fea_results",
-    "show_fea_results_colormap",
-    "value_to_rainbow_color",
+    "read_load_info",
+    "save_load_info",
+    "read_material_info",
+    "save_material_info",
+    "export_fea_combined_gltf",
+    "value_to_limit_color",
     # Assembly API
     "AssemblyConfig",
     "AssemblyResult",

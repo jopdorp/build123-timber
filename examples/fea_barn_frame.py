@@ -10,9 +10,9 @@ from pathlib import Path
 from ocp_vscode import reset_show, show_object
 
 from timber_joints.barn import BarnConfig, BarnFrame
-from timber_joints.fea import LoadBC
+from timber_joints.fea import LoadBC, export_fea_combined_gltf
 
-from fea_utils import visualize_frame_with_mesh, run_fea_analysis, visualize_fea_results
+from fea_utils import visualize_frame_with_mesh, run_fea_analysis
 
 reset_show()
 
@@ -77,13 +77,13 @@ def left_girt_load_filter(nid, x, y, z, part, mesh):
             abs(x - left_girt_right_x) < 35.0)
 
 additional_loads = [
-    LoadBC("right_girt_load", right_girt_load_filter, dof=3, total_load=-1000.0),  # 100 kg down
-    LoadBC("left_girt_load", left_girt_load_filter, dof=1, total_load=500.0),      # 50kg sideways +X
+    LoadBC("right_girt_load", right_girt_load_filter, dof=3, total_load=-2000.0),  # 200 kg down
+    LoadBC("left_girt_load", left_girt_load_filter, dof=1, total_load=800.0),      # 80kg sideways +X
 ]
 
 print(f"Additional loads:")
-print(f"  - Right girt at Y={right_girt_y_quarter:.1f}mm: 100 kg downward")
-print(f"  - Left girt at Y={left_girt_y_threequarter:.1f}mm: 50 kg sideways (+X)")
+print(f"  - Right girt at Y={right_girt_y_quarter:.1f}mm: 200 kg downward")
+print(f"  - Left girt at Y={left_girt_y_threequarter:.1f}mm: 80 kg sideways (+X)")
 print(f"  - Self-weight: automatic")
 print()
 
@@ -100,7 +100,13 @@ result = run_fea_analysis(
 )
 
 # %%
-# Visualize FEA results with limit-based colormap
+# Export FEA results to GLTF with limit-based colormap
 # - Displacement limit: beam_length/300 (L/300)
 # - Stress limit: 24 MPa (C24 f_m_k)
-visualize_fea_results(result, output_dir, cad_shapes, scale=60.0, reference_length=config.beam_length)
+if result.success:
+    export_fea_combined_gltf(
+        output_dir=output_dir,
+        scale=4.0,
+        reference_length=config.beam_length,
+        stress_limit=24.0,  # C24 f_m_k
+    )

@@ -10,9 +10,9 @@ from pathlib import Path
 from ocp_vscode import reset_show, show_object
 
 from timber_joints.alignment import build_complete_bent
-from timber_joints.fea import TimberFrame, LoadBC
+from timber_joints.fea import TimberFrame, LoadBC, export_fea_combined_gltf
 
-from fea_utils import visualize_frame_with_mesh, run_fea_analysis, visualize_fea_results
+from fea_utils import visualize_frame_with_mesh, run_fea_analysis
 
 reset_show()
 
@@ -84,7 +84,12 @@ result = run_fea_analysis(
 )
 
 # %%
-# Visualize FEA results with limit-based colormap
+# Export FEA results to GLTF with limit-based colormap
 # - Displacement limit: 5000/300 = 16.7mm (L/300)
 # - Stress limit: 24 MPa (C24 f_m_k)
-visualize_fea_results(result, output_dir, cad_shapes, scale=1.0, reference_length=5000.0)
+if result.success:
+    export_fea_combined_gltf(
+        output_dir=output_dir,
+        scale=1.0,
+        reference_length=5000.0,
+    )

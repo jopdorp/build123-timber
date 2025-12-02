@@ -23,6 +23,7 @@ keywords = [
 dependencies = [
     "build123d>=0.5.0",
     "ocp-vscode>=2.0.0",
+    "trimesh[easy]>=4.0.0",
 ]
 
 [project.optional-dependencies]
