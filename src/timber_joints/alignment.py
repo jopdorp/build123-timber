@@ -888,13 +888,14 @@ def build_rafter_pair(
     # Girt section is the X extent (width of the timber cross-section)
     girt_section = left_girt.bounding_box().max.X - left_girt.bounding_box().min.X
     # Top surface offset along the rafter due to pitch angle
-    top_surface_offset = rafter_params.section * math.tan(math.radians(rafter_params.pitch_angle))
     # Lap length: from overhang tip to inner edge of girt (where rafter top surface meets girt inner edge)
-    lap_length = rafter_params.overhang + girt_section / math.cos(math.radians(rafter_params.pitch_angle)) + top_surface_offset
+    lap_length = rafter_params.overhang + rafter_params.section / 2 * math.tan(math.radians(rafter_params.pitch_angle))
     # Rafter length: from overhang tip to peak, plus extra for the peak joint overlap
     # The rafter needs to extend past center by section/cos(angle) for the tongue-and-fork joint
     peak_extension = rafter_params.section / math.cos(math.radians(rafter_params.pitch_angle))
-    rafter_length = half_building_width / math.cos(math.radians(rafter_params.pitch_angle)) + rafter_params.overhang + top_surface_offset + peak_extension
+    # rafter_length = half_building_width / math.cos(math.radians(rafter_params.pitch_angle)) + rafter_params.overhang + peak_extension + (rafter_params.section / 2) * math.tan(math.radians(rafter_params.pitch_angle)) - girt_section * math.tan(math.radians(rafter_params.pitch_angle))# inside edge
+    rafter_length = half_building_width / math.cos(math.radians(rafter_params.pitch_angle)) + rafter_params.overhang + peak_extension - rafter_params.section * math.tan(math.radians(rafter_params.pitch_angle)) # middle
+    # rafter_length = half_building_width / math.cos(math.radians(rafter_params.pitch_angle)) + rafter_params.overhang + peak_extension # outside edge
     
     left_rafter_beam = Beam(
         length=rafter_length,
@@ -1017,7 +1018,7 @@ def add_rafters_to_barn(
     """Add rafters to a barn frame at each bent position.
     
     Creates rafter pairs at each Y position, with tongue-and-fork joints
-    at the peak and lap joints at the girts.
+    at the peak and lap joints at the girts. Cuts lap joints into girts.
     
     Args:
         left_girt: Left girt (will be updated with lap cuts)
@@ -1026,28 +1027,40 @@ def add_rafters_to_barn(
         rafter_params: Configuration for rafters (default: RafterParams())
     
     Returns:
-        RafterResult with all rafter pairs and updated girts
+        RafterResult with all rafter pairs and updated girts with lap cuts
     """
     if rafter_params is None:
         rafter_params = RafterParams()
     
     rafter_pairs = []
-    current_left_girt = left_girt
-    current_right_girt = right_girt
+    all_left_rafters = []
+    all_right_rafters = []
     
     for y_pos in y_positions:
         pair = build_rafter_pair(
-            left_girt=current_left_girt,
-            right_girt=current_right_girt,
+            left_girt=left_girt,
+            right_girt=right_girt,
             y_position=y_pos,
             rafter_params=rafter_params,
         )
         rafter_pairs.append(pair)
-        current_left_girt = pair.left_girt
-        current_right_girt = pair.right_girt
+        all_left_rafters.append(pair.left_rafter)
+        all_right_rafters.append(pair.right_rafter)
+    
+    # Cut lap joints into girts using all rafters as cutting shapes
+    updated_left_girt = left_girt
+    updated_right_girt = right_girt
+    
+    # Cut left girt with all left rafters
+    left_rafter_compound = Compound(all_left_rafters)
+    updated_left_girt = create_receiving_cut(left_rafter_compound, updated_left_girt)
+    
+    # Cut right girt with all right rafters
+    right_rafter_compound = Compound(all_right_rafters)
+    updated_right_girt = create_receiving_cut(right_rafter_compound, updated_right_girt)
     
     return RafterResult(
         rafter_pairs=rafter_pairs,
-        updated_left_girt=current_left_girt,
-        updated_right_girt=current_right_girt,
+        updated_left_girt=updated_left_girt,
+        updated_right_girt=updated_right_girt,
     )

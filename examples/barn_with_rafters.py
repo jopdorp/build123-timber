@@ -41,7 +41,8 @@ config = BarnConfig(
     include_rafters=True,
     rafter_section=100,
     rafter_pitch=30,
-    rafter_overhang=300,
+    rafter_overhang=200,
+    num_rafters=7
 )
 
 barn = BarnFrame.build(config)
