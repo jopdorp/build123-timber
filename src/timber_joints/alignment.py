@@ -20,6 +20,10 @@ class JointParams:
     shoulder_depth: float = 20.0
     housing_depth: float = 20.0
     post_top_extension: float = 300.0
+    # Peg parameters
+    include_pegs: bool = False          # Whether to include pegs in joints
+    peg_diameter: float = 15.0          # Peg diameter (1.5cm default)
+    peg_offset: float = 30.0            # Distance from shoulder to peg center
     
     def get_joint_class(self):
         if self.joint_class is None:
@@ -27,8 +31,10 @@ class JointParams:
             return ShoulderedTenon
         return self.joint_class
     
-    def get_tenon_dimensions(self, beam_width: float, beam_height: float) -> tuple[float, float]:
+    def get_tenon_dimensions(self, beam_width: float, beam_height: Optional[float] = None) -> tuple[float, float]:
         """Calculate tenon width and height from beam dimensions."""
+        if beam_height is None:
+            beam_height = beam_width  # Assume square section if height not provided
         return beam_width * self.tenon_width_ratio, beam_height * self.tenon_height_ratio
 
 
@@ -41,6 +47,10 @@ class BraceParams:
     tenon_length: float = 60.0
     post_joint_class: Optional[Type["BaseJoint"]] = None
     beam_joint_class: Optional[Type["BaseJoint"]] = None
+    # Peg parameters
+    include_pegs: bool = False          # Whether to include pegs in brace joints
+    peg_diameter: float = 15.0          # Peg diameter (1.5cm default)
+    peg_offset: float = 30.0            # Distance from shoulder to peg center
     
     def get_post_joint_class(self):
         if self.post_joint_class is None:
@@ -63,6 +73,7 @@ class BentResult:
     beam: Part
     brace_left: Optional[Part] = None
     brace_right: Optional[Part] = None
+    pegs: List[Part] = field(default_factory=list)  # Pegs for tenon joints
     
     # Dimensions for reference
     post_section: float = 0.0
@@ -87,6 +98,10 @@ class RafterParams:
     overhang: float = 200.0         # Eave overhang beyond girt
     tongue_width_ratio: float = 1/3  # Tongue width as fraction of section
     lap_depth_ratio: float = 0.5    # Lap joint depth as fraction of section
+    # Peg parameters
+    include_pegs: bool = False       # Whether to include pegs in lap joints
+    peg_diameter: float = 15.0       # Peg diameter (1.5cm default)
+    peg_offset: float = 30.0         # Distance from shoulder to peg center
     
     def get_tongue_width(self) -> float:
         """Get tongue width for peak joint."""
@@ -104,6 +119,8 @@ class RafterPair:
     right_rafter: Part  # Rafter on right side (positive X)
     left_girt: Part     # Left girt with lap cut
     right_girt: Part    # Right girt with lap cut
+    pegs: List[Part] = field(default_factory=list)  # Pegs for lap joints and peak joint
+    peg_holes: List[Part] = field(default_factory=list)  # Peg holes for cutting girts
 
 
 @dataclass
@@ -560,6 +577,288 @@ def create_brace_for_girt(
     )
 
 
+def create_tenon_peg_for_mortise(
+    beam_bbox,
+    post_bbox,
+    tenon_width: float,
+    tenon_height: float,
+    tenon_length: float,
+    peg_offset: float,
+    peg_diameter: float,
+    at_start: bool = True,
+) -> Part:
+    """Create a peg for a beam-to-post tenon joint.
+    
+    The peg goes through the post (Y direction) perpendicular to the tenon,
+    positioned peg_offset distance from the shoulder into the tenon.
+    
+    Args:
+        beam_bbox: Bounding box of the positioned beam
+        post_bbox: Bounding box of the post (vertical)
+        tenon_width: Width of the tenon
+        tenon_height: Height of the tenon
+        tenon_length: Length of the tenon penetrating into post
+        peg_offset: Distance from shoulder to peg center
+        peg_diameter: Diameter of the peg
+        at_start: True if joint is at beam start, False for beam end
+    
+    Returns:
+        Cylindrical peg positioned to pass through tenon
+    """
+    from timber_joints.utils import create_peg
+    
+    # Peg length is full post width (Y direction)
+    peg_length = post_bbox.max.Y - post_bbox.min.Y
+    
+    # Create peg along Y axis
+    peg = create_peg(length=peg_length, diameter=peg_diameter, axis=Axis.Y)
+    
+    # Calculate peg position
+    # Z position: center of tenon height in the beam
+    beam_center_z = (beam_bbox.min.Z + beam_bbox.max.Z) / 2
+    
+    # X position: offset from shoulder into the tenon (inside the post)
+    if at_start:
+        # Tenon at beam start - peg is at beam start + offset
+        peg_x = beam_bbox.min.X + peg_offset
+    else:
+        # Tenon at beam end - peg is at beam end - offset
+        peg_x = beam_bbox.max.X - peg_offset
+    
+    # Y position: start at post's Y min
+    peg_y = post_bbox.min.Y
+    
+    # Move peg to position
+    peg = peg.move(Location((peg_x, peg_y, beam_center_z)))
+    
+    return peg
+
+
+def create_lap_peg_for_rafter(
+    rafter_bbox,
+    girt_bbox,
+    peg_diameter: float,
+    lap_depth: float,
+    peg_offset: float = 30.0,
+    pitch_angle: float = 0.0,
+) -> Part:
+    """Create a peg for a rafter-to-girt lap joint.
+    
+    The peg goes perpendicular to the rafter (tilted with pitch angle),
+    positioned offset from the inner edge of the girt into the lap.
+    
+    Args:
+        rafter_bbox: Bounding box of the rafter
+        girt_bbox: Bounding box of the girt
+        peg_diameter: Diameter of the peg
+        lap_depth: Depth of the lap cut (how deep into the rafter)
+        peg_offset: Distance from girt inner edge to peg center
+        pitch_angle: Roof pitch angle in degrees (for rotating the peg)
+    
+    Returns:
+        Cylindrical peg positioned to pass through lap joint
+    """
+    import math
+    from timber_joints.utils import create_peg
+    
+    # Peg length goes through lap depth plus into girt (total = lap_depth + some girt penetration)
+    # Use lap_depth * 2 to go through rafter lap and into girt
+    peg_length = lap_depth * 2
+    
+    # Create peg along Z axis initially
+    peg = create_peg(length=peg_length, diameter=peg_diameter, axis=Axis.Z)
+    
+    # Y position: center of rafter in Y
+    peg_y = (rafter_bbox.min.Y + rafter_bbox.max.Y) / 2
+    
+    # X position: offset from girt inner edge into the lap
+    # Left rafter (negative X side): girt inner edge is max.X, peg goes toward -X
+    # Right rafter (positive X side): girt inner edge is min.X, peg goes toward +X
+    rafter_center_x = (rafter_bbox.min.X + rafter_bbox.max.X) / 2
+    girt_center_x = (girt_bbox.min.X + girt_bbox.max.X) / 2
+    
+    is_left_rafter = rafter_center_x < girt_center_x
+    
+    # Calculate angle offset for tilted peg
+    angle_rad = math.radians(pitch_angle)
+    
+    if is_left_rafter:
+        # Left rafter - peg offset from girt's max.X toward -X
+        # Also offset X for the tilted peg (peg tilts outward, bottom moves toward center)
+        x_tilt_offset = (peg_length / 2) * math.sin(angle_rad)
+        peg_x = girt_bbox.max.X - peg_offset + x_tilt_offset
+        # Rotate peg to be perpendicular to left rafter (tilted outward)
+        peg = peg.rotate(Axis.Y, pitch_angle)
+    else:
+        # Right rafter - peg offset from girt's min.X toward +X
+        # Also offset X for the tilted peg (peg tilts outward, bottom moves toward center)
+        x_tilt_offset = (peg_length / 2) * math.sin(angle_rad)
+        peg_x = girt_bbox.min.X + peg_offset - x_tilt_offset
+        # Rotate peg to be perpendicular to right rafter (tilted outward)
+        peg = peg.rotate(Axis.Y, -pitch_angle)
+    
+    # Z position: lower the peg so it penetrates through the tilted rafter into the girt
+    # The tilted rafter section requires section/cos(angle) of vertical travel to pass through
+    # The peg needs to be lowered to account for the tilted rafter thickness
+    z_offset = lap_depth / math.cos(angle_rad) - lap_depth
+    peg_z = girt_bbox.max.Z - lap_depth - z_offset
+    
+    # Move peg to position
+    peg = peg.move(Location((peg_x, peg_y, peg_z)))
+    
+    return peg
+
+
+def create_peak_peg_for_rafter(
+    left_rafter_bbox,
+    right_rafter_bbox,
+    peg_diameter: float,
+    peg_offset: float,
+    pitch_angle: float,
+    rafter_section: float,
+) -> Part:
+    """Create a peg for the tongue-and-fork joint at the rafter peak.
+    
+    The peg goes through the Y direction (side of both rafters) at the peak,
+    passing through the tongue (left rafter) and fork (right rafter).
+    
+    Args:
+        left_rafter_bbox: Bounding box of the positioned left rafter
+        right_rafter_bbox: Bounding box of the positioned right rafter
+        peg_diameter: Diameter of the peg
+        peg_offset: Distance from the shoulder along the tongue
+        pitch_angle: Roof pitch angle in degrees
+        rafter_section: Rafter cross-section size
+    
+    Returns:
+        Cylindrical peg positioned at the peak joint
+    """
+    import math
+    from timber_joints.utils import create_peg
+    
+    # Peg goes through Y direction
+    peg_length = max(
+        right_rafter_bbox.max.Y - right_rafter_bbox.min.Y,
+        left_rafter_bbox.max.Y - left_rafter_bbox.min.Y,
+    )
+    peg = create_peg(length=peg_length, diameter=peg_diameter, axis=Axis.Y)
+    
+    # Peak is where the two rafters meet - use the overlap region
+    # The peak X is approximately at the center where both rafters overlap
+    peak_x = (left_rafter_bbox.max.X + right_rafter_bbox.min.X) / 2
+    
+    # The peak Z is at the top of the rafters
+    peak_z = max(left_rafter_bbox.max.Z, right_rafter_bbox.max.Z)
+    
+    # The tongue goes from the left rafter into the right rafter
+    # Peg should be offset from the shoulder (where tongue meets left rafter body)
+    # and centered in the tenon cross-section
+    angle_rad = math.radians(pitch_angle)
+    
+    # The tongue center line is at rafter_section/2 from the top surface
+    # perpendicular to the rafter direction
+    # First find the center of the tenon (offset perpendicular to rafter)
+    center_offset = rafter_section / 2
+    
+    # Tongue direction is along the left rafter (going toward +X and -Z from peak)
+    # Start from peak, offset perpendicular to get to center, then offset along tongue
+    peg_x = peak_x - peg_offset * math.cos(angle_rad) + center_offset * math.sin(angle_rad)
+    peg_z = peak_z - center_offset * math.cos(angle_rad) - peg_offset * math.sin(angle_rad)
+    
+    # Y position at rafter front
+    peg_y = min(left_rafter_bbox.min.Y, right_rafter_bbox.min.Y)
+    
+    peg = peg.move(Location((peg_x, peg_y, peg_z)))
+    
+    return peg
+
+
+def create_brace_peg(
+    brace_bbox,
+    receiving_member_bbox,
+    peg_diameter: float,
+    brace_angle: float,
+    brace_section: float,
+    tenon_length: float,
+    is_post_connection: bool,
+    is_left_brace: bool = True,
+) -> Part:
+    """Create a peg for a brace tenon joint.
+    
+    The peg goes through the receiving member (Y direction) perpendicular to the brace,
+    centered in the tenon (at tenon_length/2 from the shoulder).
+    
+    Args:
+        brace_bbox: Bounding box of the positioned brace
+        receiving_member_bbox: Bounding box of the post or beam
+        peg_diameter: Diameter of the peg
+        brace_angle: Angle of the brace in degrees
+        brace_section: Cross-section size of the brace
+        tenon_length: Length of the tenon (peg will be at center)
+        is_post_connection: True for post (lower) connection, False for beam (upper)
+        is_left_brace: True for left brace (goes up-right), False for right brace (goes up-left)
+    
+    Returns:
+        Cylindrical peg positioned to pass through brace tenon
+    """
+    import math
+    from timber_joints.utils import create_peg
+    
+    # Peg goes through Y direction (side of receiving member)
+    peg_length = receiving_member_bbox.max.Y - receiving_member_bbox.min.Y
+    peg = create_peg(length=peg_length, diameter=peg_diameter, axis=Axis.Y)
+    
+    angle_rad = math.radians(brace_angle)
+    
+    # The brace centerline runs through the middle of the brace body.
+    # For a left brace at angle θ going up-right:
+    #   - At the post end, the brace is at its lowest Z
+    #   - The centerline Z at the post face = brace_bottom_at_post + (section/2)/cos(θ)
+    #   - But the brace bottom at the post varies with X along the brace
+    #
+    # Key insight: The brace bounding box min/max give us the extremes.
+    # For the post connection, the brace center in Z at the receiving member face can be 
+    # found using the centerline: brace runs at angle θ, so the center follows this slope.
+    #
+    # For POST connection (horizontal tenon):
+    #   - Peg X = inside post - tenon_length/2
+    #   - Peg Z = center of brace at that X position
+    #
+    # The center of the brace bbox gives us the center of the whole brace.
+    # From there, we can calculate the center at a specific X.
+    
+    brace_center_x = (brace_bbox.min.X + brace_bbox.max.X) / 2
+    brace_center_z = (brace_bbox.min.Z + brace_bbox.max.Z) / 2
+    
+    if is_post_connection:
+        # Tenon goes horizontally into post
+        if is_left_brace:
+            peg_x = receiving_member_bbox.max.X - tenon_length / 2
+            # Brace centerline has slope tan(angle), going up to the right
+            # At peg_x, Z offset from center = (peg_x - brace_center_x) * tan(angle)
+            peg_z = brace_center_z + (peg_x - brace_center_x) * math.tan(angle_rad)
+        else:
+            peg_x = receiving_member_bbox.min.X + tenon_length / 2
+            # Right brace goes up to the left, so negative slope
+            peg_z = brace_center_z - (peg_x - brace_center_x) * math.tan(angle_rad)
+    else:
+        # Tenon goes vertically into beam (from below)
+        peg_z = receiving_member_bbox.min.Z + tenon_length / 2
+        
+        if is_left_brace:
+            # Find X at the beam level using brace centerline
+            # At peg_z, X offset from center = (peg_z - brace_center_z) / tan(angle)
+            peg_x = brace_center_x + (peg_z - brace_center_z) / math.tan(angle_rad)
+        else:
+            # Right brace: at higher Z, X is lower (going left)
+            peg_x = brace_center_x - (peg_z - brace_center_z) / math.tan(angle_rad)
+    
+    peg_y = receiving_member_bbox.min.Y
+    
+    peg = peg.move(Location((peg_x, peg_y, peg_z)))
+    return peg
+
+
 def  build_complete_bent(
     post_height: float = 3000,
     post_section: float = 150,
@@ -656,6 +955,41 @@ def  build_complete_bent(
     right_post = right_post_with_mortise
     beam = positioned_beam
     
+    # Create pegs for beam-to-post joints if requested
+    pegs = []
+    if joint_params.include_pegs:
+        # Left post peg (beam start)
+        left_peg = create_tenon_peg_for_mortise(
+            beam_bbox=beam_for_left_cut.bounding_box(),
+            post_bbox=vertical_post_left.bounding_box(),
+            tenon_width=tenon_width,
+            tenon_height=tenon_height,
+            tenon_length=joint_params.tenon_length,
+            peg_offset=joint_params.peg_offset,
+            peg_diameter=joint_params.peg_diameter,
+            at_start=True,
+        )
+        pegs.append(left_peg)
+        # Cut peg hole from left post and beam
+        left_post = left_post - left_peg
+        beam = beam - left_peg
+        
+        # Right post peg (beam end)
+        right_peg = create_tenon_peg_for_mortise(
+            beam_bbox=positioned_beam.bounding_box(),
+            post_bbox=positioned_post_right_cut.bounding_box(),
+            tenon_width=tenon_width,
+            tenon_height=tenon_height,
+            tenon_length=joint_params.tenon_length,
+            peg_offset=joint_params.peg_offset,
+            peg_diameter=joint_params.peg_diameter,
+            at_start=False,
+        )
+        pegs.append(right_peg)
+        # Cut peg hole from right post and beam
+        right_post = right_post - right_peg
+        beam = beam - right_peg
+    
     # Add braces if requested
     brace_left = None
     brace_right = None
@@ -683,6 +1017,81 @@ def  build_complete_bent(
         brace_right = right_brace_result.shape
         right_post = right_brace_result.post
         beam = right_brace_result.horizontal_member
+        
+        # Create brace pegs if requested
+        if brace_params.include_pegs:
+            # Left brace pegs (2 pegs: post connection and beam connection)
+            left_brace_bbox = brace_left.bounding_box()
+            left_post_bbox = left_post.bounding_box()
+            beam_bbox = beam.bounding_box()
+            
+            # Peg for left brace to post connection
+            left_brace_post_peg = create_brace_peg(
+                brace_bbox=left_brace_bbox,
+                receiving_member_bbox=left_post_bbox,
+                peg_diameter=brace_params.peg_diameter,
+                brace_angle=brace_params.angle,
+                brace_section=brace_params.section,
+                tenon_length=brace_params.tenon_length,
+                is_post_connection=True,
+                is_left_brace=True,
+            )
+            pegs.append(left_brace_post_peg)
+            # Cut peg hole from left post and left brace
+            left_post = left_post - left_brace_post_peg
+            brace_left = brace_left - left_brace_post_peg
+            
+            # Peg for left brace to beam connection
+            left_brace_beam_peg = create_brace_peg(
+                brace_bbox=left_brace_bbox,
+                receiving_member_bbox=beam_bbox,
+                peg_diameter=brace_params.peg_diameter,
+                brace_angle=brace_params.angle,
+                brace_section=brace_params.section,
+                tenon_length=brace_params.tenon_length,
+                is_post_connection=False,
+                is_left_brace=True,
+            )
+            pegs.append(left_brace_beam_peg)
+            # Cut peg hole from beam and left brace
+            beam = beam - left_brace_beam_peg
+            brace_left = brace_left - left_brace_beam_peg
+            
+            # Right brace pegs (2 pegs: post connection and beam connection)
+            right_brace_bbox = brace_right.bounding_box()
+            right_post_bbox = right_post.bounding_box()
+            
+            # Peg for right brace to post connection
+            right_brace_post_peg = create_brace_peg(
+                brace_bbox=right_brace_bbox,
+                receiving_member_bbox=right_post_bbox,
+                peg_diameter=brace_params.peg_diameter,
+                brace_angle=brace_params.angle,
+                brace_section=brace_params.section,
+                tenon_length=brace_params.tenon_length,
+                is_post_connection=True,
+                is_left_brace=False,
+            )
+            pegs.append(right_brace_post_peg)
+            # Cut peg hole from right post and right brace
+            right_post = right_post - right_brace_post_peg
+            brace_right = brace_right - right_brace_post_peg
+            
+            # Peg for right brace to beam connection
+            right_brace_beam_peg = create_brace_peg(
+                brace_bbox=right_brace_bbox,
+                receiving_member_bbox=beam_bbox,
+                peg_diameter=brace_params.peg_diameter,
+                brace_angle=brace_params.angle,
+                brace_section=brace_params.section,
+                tenon_length=brace_params.tenon_length,
+                is_post_connection=False,
+                is_left_brace=False,
+            )
+            pegs.append(right_brace_beam_peg)
+            # Cut peg hole from beam and right brace
+            beam = beam - right_brace_beam_peg
+            brace_right = brace_right - right_brace_beam_peg
     
     return BentResult(
         left_post=left_post,
@@ -690,6 +1099,7 @@ def  build_complete_bent(
         beam=beam,
         brace_left=brace_left,
         brace_right=brace_right,
+        pegs=pegs,
         post_section=post_section,
         beam_section=beam_section,
         beam_length=beam_length,
@@ -876,6 +1286,8 @@ def build_rafter_pair(
     y_position: float,
     rafter_params: RafterParams,
 ) -> RafterPair:
+    from timber_joints.utils import create_peg
+    
     # Full building width (outer edge to outer edge of girts)
     building_width = right_girt.bounding_box().max.X - left_girt.bounding_box().min.X
     half_building_width = building_width / 2
@@ -895,6 +1307,9 @@ def build_rafter_pair(
     rafter_length = half_building_width / math.cos(math.radians(rafter_params.pitch_angle)) + rafter_params.overhang + peak_extension - rafter_params.section * math.tan(math.radians(rafter_params.pitch_angle)) # middle
     # rafter_length = half_building_width / math.cos(math.radians(rafter_params.pitch_angle)) + rafter_params.overhang + peak_extension # outside edge
     
+    lap_depth = rafter_params.get_lap_depth()
+    
+    # === LEFT RAFTER ===
     left_rafter_beam = Beam(
         length=rafter_length,
         width=rafter_params.section,
@@ -904,10 +1319,27 @@ def build_rafter_pair(
     left_rafter_with_lap = LapJoint(
         beam=left_rafter_beam.shape,
         cut_length=lap_length,
-        cut_depth=rafter_params.section / 2,
+        cut_depth=lap_depth,
         from_top=False,
         at_start=True,
     ).shape
+    
+    # Create lap peg BEFORE rotation (rafter is horizontal, peg is vertical)
+    left_lap_peg = None
+    left_peg_hole = None
+    if rafter_params.include_pegs:
+        peg_length = rafter_params.section  # Full rafter section
+        left_lap_peg = create_peg(length=peg_length, diameter=rafter_params.peg_diameter, axis=Axis.Z)
+        # Position peg in the lap area: offset from start of lap joint (girt-side edge at x=lap_length)
+        peg_x = lap_length - rafter_params.peg_offset  # offset inward from girt-side edge of lap
+        peg_y = rafter_params.section / 2  # center of rafter width
+        peg_z = 0  # start at bottom of rafter (peg goes through full section)
+        left_lap_peg = left_lap_peg.move(Location((peg_x, peg_y, peg_z)))
+        # Create peg hole (same position, will be used to cut rafter and girt)
+        left_peg_hole = create_peg(length=peg_length, diameter=rafter_params.peg_diameter, axis=Axis.Z)
+        left_peg_hole = left_peg_hole.move(Location((peg_x, peg_y, peg_z)))
+        # Cut peg hole from rafter (before adding tenon)
+        left_rafter_with_lap = left_rafter_with_lap - left_peg_hole
 
     left_rafter_with_tenon = ShoulderedTenon(
         beam=left_rafter_with_lap,
@@ -918,11 +1350,17 @@ def build_rafter_pair(
         at_start=False,
     ).shape
     
+    # Rotate left rafter (and peg together if exists)
     left_rafter_rotated = left_rafter_with_tenon.rotate(
         Axis.Y,
         -rafter_params.pitch_angle,
     )
+    if left_lap_peg is not None:
+        left_lap_peg = left_lap_peg.rotate(Axis.Y, -rafter_params.pitch_angle)
+    if left_peg_hole is not None:
+        left_peg_hole = left_peg_hole.rotate(Axis.Y, -rafter_params.pitch_angle)
 
+    # === RIGHT RAFTER ===
     right_rafter_beam = Beam(
         length=rafter_length,
         width=rafter_params.section,
@@ -932,10 +1370,30 @@ def build_rafter_pair(
     right_rafter_with_lap = LapJoint(
         beam=right_rafter_beam.shape,
         cut_length=lap_length,
-        cut_depth=rafter_params.section / 2,
+        cut_depth=lap_depth,
         from_top=False,
         at_start=False,
-    ).shape.rotate(
+    ).shape
+    
+    # Create lap peg BEFORE rotation for right rafter
+    right_lap_peg = None
+    right_peg_hole = None
+    if rafter_params.include_pegs:
+        peg_length = rafter_params.section  # Full rafter section
+        right_lap_peg = create_peg(length=peg_length, diameter=rafter_params.peg_diameter, axis=Axis.Z)
+        # Position peg in the lap area: offset from start of lap joint (which is at rafter_length - lap_length)
+        peg_x = rafter_length - lap_length + rafter_params.peg_offset  # offset from start of lap joint
+        peg_y = rafter_params.section / 2  # center of rafter width
+        peg_z = 0  # start at bottom of rafter (peg goes through full section)
+        right_lap_peg = right_lap_peg.move(Location((peg_x, peg_y, peg_z)))
+        # Create peg hole (same position, will be used to cut rafter and girt)
+        right_peg_hole = create_peg(length=peg_length, diameter=rafter_params.peg_diameter, axis=Axis.Z)
+        right_peg_hole = right_peg_hole.move(Location((peg_x, peg_y, peg_z)))
+        # Cut peg hole from rafter
+        right_rafter_with_lap = right_rafter_with_lap - right_peg_hole
+    
+    # Rotate and position right rafter (and peg)
+    right_rafter_rotated = right_rafter_with_lap.rotate(
         Axis.Y,
         rafter_params.pitch_angle,
     ).move(Location((
@@ -943,10 +1401,30 @@ def build_rafter_pair(
         0,
         rafter_length * math.sin(math.radians(rafter_params.pitch_angle)),
     )))
+    
+    if right_lap_peg is not None:
+        right_lap_peg = right_lap_peg.rotate(
+            Axis.Y,
+            rafter_params.pitch_angle,
+        ).move(Location((
+            rafter_length * math.cos(math.radians(rafter_params.pitch_angle)) - rafter_params.section * 2,
+            0,
+            rafter_length * math.sin(math.radians(rafter_params.pitch_angle)),
+        )))
+    
+    if right_peg_hole is not None:
+        right_peg_hole = right_peg_hole.rotate(
+            Axis.Y,
+            rafter_params.pitch_angle,
+        ).move(Location((
+            rafter_length * math.cos(math.radians(rafter_params.pitch_angle)) - rafter_params.section * 2,
+            0,
+            rafter_length * math.sin(math.radians(rafter_params.pitch_angle)),
+        )))
 
     right_rafter_with_mortise = create_receiving_cut(
         positioned_insert=left_rafter_rotated,
-        receiving_shape=right_rafter_with_lap,
+        receiving_shape=right_rafter_rotated,
     )
 
     left_trimbox = Box(
@@ -988,22 +1466,58 @@ def build_rafter_pair(
     
     # Z position: rafter top face aligns with girt top
     girt_top = left_girt.bounding_box().max.Z
+    
+    # Final positioning offset
+    final_offset = Location((
+        building_center_x - rafter_pair_center_x,
+        y_position,
+        building_height - lap_length * math.sin(math.radians(rafter_params.pitch_angle)) - rafter_params.section / 2 * math.cos(math.radians(rafter_params.pitch_angle)),
+    ))
 
-    moved_rafter_pair = [
-        rafter.move(Location((
-            building_center_x - rafter_pair_center_x,
-            y_position,
-            building_height - lap_length * math.sin(math.radians(rafter_params.pitch_angle)) - rafter_params.section / 2 * math.cos(math.radians(rafter_params.pitch_angle)),
-        ))) for rafter in rafter_pair
-    ]
+    moved_rafter_pair = [rafter.move(final_offset) for rafter in rafter_pair]
     left_rafter_positioned, right_rafter_positioned = moved_rafter_pair
     
+    # Move pegs and peg holes with the same final offset
+    pegs = []
+    peg_holes = []
+    if rafter_params.include_pegs:
+        if left_lap_peg is not None:
+            left_lap_peg = left_lap_peg.move(final_offset)
+            pegs.append(left_lap_peg)
+        
+        if left_peg_hole is not None:
+            left_peg_hole = left_peg_hole.move(final_offset)
+            peg_holes.append(left_peg_hole)
+        
+        if right_lap_peg is not None:
+            right_lap_peg = right_lap_peg.move(final_offset)
+            pegs.append(right_lap_peg)
+        
+        if right_peg_hole is not None:
+            right_peg_hole = right_peg_hole.move(final_offset)
+            peg_holes.append(right_peg_hole)
+        
+        # Peak peg (tongue-and-fork joint)
+        peak_peg = create_peak_peg_for_rafter(
+            left_rafter_bbox=left_rafter_positioned.bounding_box(),
+            right_rafter_bbox=right_rafter_positioned.bounding_box(),
+            peg_diameter=rafter_params.peg_diameter,
+            peg_offset=rafter_params.peg_offset,
+            pitch_angle=rafter_params.pitch_angle,
+            rafter_section=rafter_params.section,
+        )
+        pegs.append(peak_peg)
+        # Cut peg hole from both rafters
+        left_rafter_positioned = left_rafter_positioned - peak_peg
+        right_rafter_positioned = right_rafter_positioned - peak_peg
     
     return RafterPair(
         left_rafter=left_rafter_positioned,
         right_rafter=right_rafter_positioned,
         left_girt=left_girt,
         right_girt=right_girt,
+        pegs=pegs,
+        peg_holes=peg_holes,
     )
 
 
@@ -1033,6 +1547,8 @@ def add_rafters_to_barn(
     rafter_pairs = []
     all_left_rafters = []
     all_right_rafters = []
+    all_left_peg_holes = []
+    all_right_peg_holes = []
     
     for y_pos in y_positions:
         pair = build_rafter_pair(
@@ -1044,6 +1560,11 @@ def add_rafters_to_barn(
         rafter_pairs.append(pair)
         all_left_rafters.append(pair.left_rafter)
         all_right_rafters.append(pair.right_rafter)
+        # Collect peg holes: first hole is for left girt, second is for right girt
+        if len(pair.peg_holes) >= 1:
+            all_left_peg_holes.append(pair.peg_holes[0])
+        if len(pair.peg_holes) >= 2:
+            all_right_peg_holes.append(pair.peg_holes[1])
     
     # Cut lap joints into girts using all rafters as cutting shapes
     updated_left_girt = left_girt
@@ -1056,6 +1577,15 @@ def add_rafters_to_barn(
     # Cut right girt with all right rafters
     right_rafter_compound = Compound(all_right_rafters)
     updated_right_girt = create_receiving_cut(right_rafter_compound, updated_right_girt)
+    
+    # Cut peg holes from girts
+    if all_left_peg_holes:
+        left_peg_hole_compound = Compound(all_left_peg_holes)
+        updated_left_girt = updated_left_girt - left_peg_hole_compound
+    
+    if all_right_peg_holes:
+        right_peg_hole_compound = Compound(all_right_peg_holes)
+        updated_right_girt = updated_right_girt - right_peg_hole_compound
     
     return RafterResult(
         rafter_pairs=rafter_pairs,

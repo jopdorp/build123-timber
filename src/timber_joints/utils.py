@@ -259,3 +259,33 @@ def create_vertical_cut(post: Part, cut_class, at_top: bool = True, **cut_kwargs
         original_min_y - v_bbox.min.Y + (bbox.max.Y - bbox.min.Y - (v_bbox.max.Y - v_bbox.min.Y)) / 2,
         original_min_z - v_bbox.min.Z,
     )))
+
+
+# =============================================================================
+# Peg Utilities
+# =============================================================================
+
+def create_peg(length: float, diameter: float, axis: Axis = Axis.Y) -> Part:
+    """Create a cylindrical peg.
+    
+    Args:
+        length: Length of the peg
+        diameter: Diameter of the peg
+        axis: Axis along which the peg is oriented (default: Y)
+    
+    Returns:
+        Cylindrical part positioned at origin along specified axis
+    """
+    from build123d import Cylinder
+    
+    # Create cylinder along Z axis first
+    peg = Cylinder(radius=diameter / 2, height=length, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    
+    # Rotate to desired axis
+    if axis == Axis.X:
+        peg = peg.rotate(Axis.Y, 90)
+    elif axis == Axis.Y:
+        peg = peg.rotate(Axis.X, -90)
+    # Z axis is default, no rotation needed
+    
+    return peg
